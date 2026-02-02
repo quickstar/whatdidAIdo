@@ -1,4 +1,6 @@
 {
+  "database": "C:\\Users\\Lukas\\OneDrive\\ActivityWatchSync\\andromeda\\1750b5f1-5fee-4977-b0f5-4f433e976517\\test.db",
+
   "clients": {
     "roche": "Roche",
     "uzh": "UZH",
@@ -48,5 +50,15 @@
     "argocd-config": "Infrastructure/GitOps"
   },
   "known_tickets": {
+  },
+
+  "contacts": {
+    "Barbara Rossa": "DM Drogerie",
+    "Björn Bur": "3volutions (internal)"
+  },
+
+  "correlations": {
+    "dm drogerie": ["Barbara Rossa"],
+    "stgag": ["STG-W858"]
   }
 }

@@ -4,19 +4,45 @@ This directory contains tools for analyzing ActivityWatch data exports to genera
 
 ## Files
 
-- `aw-buckets-export.json` - ActivityWatch data export (large JSON file)
-- `worklog.py` - Python script to analyze activity data
+- `worklog_db.py` - **Primary script** - Queries SQLite database directly (fast, real-time)
+- `worklog.py` - Legacy script using JSON export
 - `config.json` - Configuration for clients, projects, context hints
+- `aw-buckets-export.json` - ActivityWatch data export (for legacy script)
 
 ## Quick Usage
 
 When the user asks "what did I do on [date]?" or needs a worklog for a specific date:
 
 ```bash
-python3 D:/work/worklog.py <date> --ai
+python3 D:/work/worklog_db.py <date> --ai
 ```
 
 Then interpret the output into reportable worklog buckets with time estimates.
+
+### Shortcuts
+```bash
+python3 D:/work/worklog_db.py today --ai      # Today's activity
+python3 D:/work/worklog_db.py yesterday --ai  # Yesterday's activity
+```
+
+### Database Location
+
+Configured in `config.json`:
+```json
+{
+  "database": "C:\\Users\\Lukas\\OneDrive\\ActivityWatchSync\\andromeda\\...\\test.db"
+}
+```
+
+Or via environment variable:
+```bash
+set AW_DATABASE=C:\path\to\test.db
+```
+
+Or CLI argument:
+```bash
+python3 worklog_db.py 27.01.2026 --ai --db "C:\path\to\test.db"
+```
 
 ### Date formats accepted
 - `27.01.2026` (European)
