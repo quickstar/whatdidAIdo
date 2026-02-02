@@ -1,0 +1,52 @@
+{
+  "clients": {
+    "roche": "Roche",
+    "uzh": "UZH",
+    "enbw": "EnBW",
+    "stgag": "STGAG",
+    "sales": "Sales (Demo)"
+  },
+  "environments": {
+    "vnext.book.3vrooms.local": "Local Dev",
+    "vnext.book.3vrooms.app": "VNext Staging",
+    "localhost:4200": "Local Frontend",
+    "deploy.3vrooms.app": "ArgoCD Deployments"
+  },
+  "ticket_prefixes": {
+    "ROMSD": "Rooms Support/Bug",
+    "ITEM": "Rooms Feature/Task"
+  },
+  "categories": [
+    "Development",
+    "Bug Fix",
+    "Code Review",
+    "Testing/QA",
+    "Support",
+    "Infrastructure/DevOps",
+    "Meetings",
+    "Documentation",
+    "Administrative"
+  ],
+  "likely_personal": [
+    "Dinner Ideas",
+    "Netflix",
+    "Amazon Shopping",
+    "Facebook",
+    "Instagram"
+  ],
+  "context_hints": {
+    "youtube.com": "Check title - could be tech tutorial or personal",
+    "t3.chat": "AI chat - likely development/research if during coding session",
+    "stackoverflow.com": "Development research",
+    "learn.microsoft.com": "Documentation/learning",
+    "github.com": "Code review or research - check if 3volutionsAG repo"
+  },
+  "projects": {
+    "rooms": "3V-ROOMS (main product)",
+    "quickrooms": "Quickrooms (Node.js frontend)",
+    "ngx-rooms-lib": "Angular rooms library",
+    "argocd-config": "Infrastructure/GitOps"
+  },
+  "known_tickets": {
+  }
+}
