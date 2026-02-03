@@ -17,7 +17,46 @@ When the user asks "what did I do on [date]?" or needs a worklog for a specific 
 python3 D:/work/worklog_db.py <date> --ai
 ```
 
-Then interpret the output into reportable worklog buckets with time estimates.
+### What the script outputs
+
+1. **Categorized Summary** - Raw detection times (marked with "raw")
+   - Meetings grouped by client using `contacts` and `correlations` from config.json
+   - JIRA tickets with raw browser/branch detection time (NOT actual work time)
+
+2. **Raw Data** - For estimating actual work time:
+   - App Times (rider64.exe, Cursor.exe, WindowsTerminal.exe, etc.)
+   - Git Branches (with ticket extraction)
+   - Window Context (what files/features were being worked on)
+
+### How to interpret and estimate time
+
+**IMPORTANT:** Ticket times marked "(raw)" are detection times, not actual work time!
+
+To estimate actual development time for a ticket:
+1. Look at **App Times** - total IDE + terminal + git time
+2. Look at **Git Branches** - which ticket branch was active
+3. Look at **Window Context** - confirms what was being worked on
+4. Attribute the dev app time to the dominant ticket
+
+**Example:**
+```
+Raw output shows: ITEM-3049: 26m (raw)
+App Times show: rider64.exe: 1.3h, Cursor.exe: 21m, Terminal: 2.6h, Git: 33m
+Git Branches show: ITEM-3049 branch was active
+Window Context shows: Translation Caching work
+
+→ Estimate: ITEM-3049 = 4.5h (sum of dev app times)
+```
+
+### Output Format
+
+Output the final worklog as a table with clickable JIRA links:
+
+| Category | Client/Ticket | Description | Time |
+|----------|---------------|-------------|------|
+| Development | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Feature description | 4.5h |
+| Bug Investigation | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | Issue description | 30m |
+| Meeting | Client (Contact) | Meeting topic | 1h |
 
 ### Shortcuts
 ```bash
@@ -51,26 +90,34 @@ python3 worklog_db.py 27.01.2026 --ai --db "C:\path\to\test.db"
 
 ## Worklog Interpretation Guidelines
 
-When creating worklog summaries:
+### Time Estimation Rules
 
-1. **Group by JIRA ticket** - Primary work items should map to tickets
-   - `ROMSD-*` = Support/Bug tickets
-   - `ITEM-*` = Feature/Task tickets
+1. **Development time** = IDE apps + Terminal (if dev session) + Git tools
+   - `rider64.exe`, `Cursor.exe`, `Code.exe` = direct coding
+   - `WindowsTerminal.exe` = dev-related if IDE time is significant
+   - `GitExtensions.exe` = version control work
 
-2. **Estimate billable time** - Usually ~85% of active time
+2. **Attribute dev time to tickets based on:**
+   - Active git branch (most reliable)
+   - Window titles mentioning ticket numbers
+   - File names matching ticket work
 
-3. **Identify categories:**
-   - Development (IDE time, specific files)
-   - Bug Fix (ROMSD tickets)
-   - Code Review (GitHub PRs)
-   - Testing/QA (test environments)
-   - Meetings (Teams)
-   - Support (ScreenConnect, remote desktop)
-   - Infrastructure (ArgoCD, Azure, deployments)
-   - Documentation
-   - Administrative (MOCO, Quickticket)
+3. **ROMSD tickets** = Bug investigation time (usually just the raw detection time)
+4. **ITEM tickets** = Feature development (attribute full dev session time)
 
-4. **Look for context in window titles** - They reveal what tickets/features were being worked on
+### Categories
+
+- **Development** - ITEM tickets, IDE time, feature work
+- **Bug Fix / Investigation** - ROMSD tickets
+- **Code Review** - GitHub PRs
+- **Meeting** - Teams (grouped by client via correlations)
+- **Support** - ScreenConnect, remote desktop sessions
+- **Infrastructure** - ArgoCD, Azure, deployments
+- **Administrative** - Email, MOCO, Quickticket
+
+### Billable Time
+
+Usually ~85% of total active time is billable.
 
 ## Context Interpretation (Important!)
 
