@@ -2,10 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Bash(git -C D:/work diff --stat)",
-      "Bash(git -C D:/work log --oneline -5)",
-      "Bash(git -C D:/work status)",
-      "Bash(git -C D:/work log --oneline -3)"
+      "Bash(python:*)"
     ]
   }
 }

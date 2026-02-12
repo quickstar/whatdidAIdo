@@ -14,8 +14,10 @@ This directory contains tools for analyzing ActivityWatch data exports to genera
 When the user asks "what did I do on [date]?" or needs a worklog for a specific date:
 
 ```bash
-python3 D:/work/worklog_db.py <date> --ai
+python D:/work/worklog_db.py <date> --ai
 ```
+
+> **Note:** On this Windows machine, use `python` not `python3`.
 
 ### What the script outputs
 
@@ -29,6 +31,8 @@ python3 D:/work/worklog_db.py <date> --ai
    - Window Context (what files/features were being worked on)
 
 ### How to interpret and estimate time
+
+You must read the config.json for better context first.
 
 **IMPORTANT:** Ticket times marked "(raw)" are detection times, not actual work time!
 
@@ -50,7 +54,7 @@ Window Context shows: Translation Caching work
 
 ### Output Format
 
-Output the final worklog as a table with clickable JIRA links:
+You MUST output the final worklog as a markdown table with clickable JIRA links. Do NOT wrap the table in code blocks. The table must come first. Additional analysis or explanations may follow after the table:
 
 | Category | Client/Ticket | Description | Time |
 |----------|---------------|-------------|------|
@@ -60,8 +64,8 @@ Output the final worklog as a table with clickable JIRA links:
 
 ### Shortcuts
 ```bash
-python3 D:/work/worklog_db.py today --ai      # Today's activity
-python3 D:/work/worklog_db.py yesterday --ai  # Yesterday's activity
+python D:/work/worklog_db.py today --ai      # Today's activity
+python D:/work/worklog_db.py yesterday --ai  # Yesterday's activity
 ```
 
 ### Database Location
@@ -80,7 +84,7 @@ set AW_DATABASE=C:\path\to\test.db
 
 Or CLI argument:
 ```bash
-python3 worklog_db.py 27.01.2026 --ai --db "C:\path\to\test.db"
+python worklog_db.py 27.01.2026 --ai --db "C:\path\to\test.db"
 ```
 
 ### Date formats accepted
