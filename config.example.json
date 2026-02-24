@@ -1,0 +1,55 @@
+{
+  "database": "C:\\path\\to\\your\\activitywatch\\aw-server\\peewee-sqlite.v2.db",
+
+  "clients": {
+    "acme": "Acme Corp",
+    "globex": "Globex Inc"
+  },
+  "environments": {
+    "app.example.com": "Production",
+    "staging.example.com": "Staging",
+    "localhost:4200": "Local Frontend"
+  },
+  "ticket_prefixes": {
+    "PROJ": "Project Tasks",
+    "BUG": "Bug Reports"
+  },
+  "categories": [
+    "Development",
+    "Bug Fix",
+    "Code Review",
+    "Testing/QA",
+    "Support",
+    "Infrastructure/DevOps",
+    "Meetings",
+    "Documentation",
+    "Administrative"
+  ],
+  "likely_personal": [
+    "Netflix",
+    "Amazon Shopping",
+    "Facebook",
+    "Instagram"
+  ],
+  "context_hints": {
+    "youtube.com": "Check title - could be tech tutorial or personal",
+    "stackoverflow.com": "Development research",
+    "github.com": "Code review or research"
+  },
+  "projects": {
+    "my-app": "Main Application",
+    "my-lib": "Shared Library"
+  },
+  "known_tickets": {
+    "PROJ-123": "Implement user authentication",
+    "BUG-456": "Fix login timeout issue"
+  },
+  "contacts": {
+    "Jane Doe": "Acme Corp",
+    "John Smith": "Globex Inc"
+  },
+  "correlations": {
+    "acme": ["Jane Doe"],
+    "globex": ["John Smith"]
+  }
+}
