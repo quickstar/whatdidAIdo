@@ -415,8 +415,22 @@ def print_ai_summary_v2(results, target_date):
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
-        last = results['active_periods'][-1][0].strftime('%H:%M')
+        last_start, last_duration = results['active_periods'][-1]
+        last = (last_start + timedelta(seconds=last_duration)).strftime('%H:%M')
         print(f"**Window: {first} - {last}**")
+
+        # Detect breaks (gaps > 15 minutes between active periods)
+        breaks = []
+        for i in range(len(results['active_periods']) - 1):
+            period_start, period_duration = results['active_periods'][i]
+            period_end = period_start + timedelta(seconds=period_duration)
+            next_start = results['active_periods'][i + 1][0]
+            gap = (next_start - period_end).total_seconds()
+            if gap > 900:  # > 15 minutes
+                breaks.append((period_end.strftime('%H:%M'), next_start.strftime('%H:%M'), gap))
+        if breaks:
+            break_strs = [f"{s} - {e} ({format_duration(d)})" for s, e, d in breaks]
+            print(f"**Breaks: {', '.join(break_strs)}**")
 
     # Detected clients
     detected_clients = detect_clients(results)
@@ -550,7 +564,8 @@ def print_ai_summary(results, target_date):
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
-        last = results['active_periods'][-1][0].strftime('%H:%M')
+        last_start, last_duration = results['active_periods'][-1]
+        last = (last_start + timedelta(seconds=last_duration)).strftime('%H:%M')
         print(f"**Window: {first} - {last}**")
 
     # Detected clients
@@ -669,7 +684,8 @@ def print_summary(results, target_date):
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
-        last = results['active_periods'][-1][0].strftime('%H:%M')
+        last_start, last_duration = results['active_periods'][-1]
+        last = (last_start + timedelta(seconds=last_duration)).strftime('%H:%M')
         print(f"Work Window: {first} - {last}")
 
     # Application time

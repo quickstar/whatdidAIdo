@@ -54,13 +54,21 @@ Window Context shows: Translation Caching work
 
 ### Output Format
 
-You MUST output the final worklog as a markdown table with clickable JIRA links. Do NOT wrap the table in code blocks. The table must come first. Additional analysis or explanations may follow after the table:
+You MUST output the final worklog as a markdown table with clickable JIRA links. Do NOT wrap the table in code blocks. The table must come first. Additional analysis or explanations may follow after the table.
 
-| Category | Client/Ticket | Description | Time |
-|----------|---------------|-------------|------|
-| Development | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Feature description | 4.5h |
-| Bug Investigation | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | Issue description | 30m |
-| Meeting | Client (Contact) | Meeting topic | 1h |
+**IMPORTANT:** The terminal breaks tables into card/list layout when they're too wide. To keep tables rendering properly, use **short category abbreviations** to save space for descriptions.
+
+Category abbreviations: Dev, Bug, Review, Mtg, Support, Infra, Admin
+
+Always add a **day summary line** before the table showing start time, end time, total active hours, and breaks (from the script's "Window", "Total Active", and "Breaks" output):
+
+**08:30 - 17:15 (7.5h active) | Lunch: 12:00 - 12:30 (30m)**
+
+| Cat | Client/Ticket | Description | Time |
+|-----|---------------|-------------|------|
+| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Feature description here | 4.5h |
+| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | Issue description here | 30m |
+| Mtg | Client (Contact) | Meeting topic | 1h |
 
 ### Shortcuts
 ```bash
