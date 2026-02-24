@@ -2,22 +2,28 @@
 
 > You know what you did. Your AI does too.
 
-A CLI tool that reads your [ActivityWatch](https://activitywatch.net/) data and uses AI to turn a day's worth of window switches, browser tabs, git branches, and meetings into a clean worklog table — so you don't have to remember what you did.
+An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.net/). Open [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in the repo, ask *"what did I do yesterday?"*, and get a clean worklog table — no manual time tracking needed.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    AW[ActivityWatch] --> DB[SQLite DB] --> WDAID[whatdidAIdo] --> AI[AI] --> WL[Worklog]
+    AW[ActivityWatch] --> DB[SQLite DB] --> CC[Claude Code] --> WL[Worklog]
 
     style AW fill:#4a9eff,color:#fff
     style DB fill:#6c757d,color:#fff
-    style WDAID fill:#ff6b6b,color:#fff
-    style AI fill:#a855f7,color:#fff
+    style CC fill:#a855f7,color:#fff
     style WL fill:#22c55e,color:#fff
 ```
 
-The script queries your ActivityWatch database, extracts activities (apps, browser history, git branches, meetings), and outputs a structured summary. Feed that to an AI (Claude, ChatGPT, etc.) and get back a formatted worklog with time estimates.
+1. **ActivityWatch** silently tracks your window activity, browser tabs, and AFK status
+2. **Claude Code** runs the analysis script, reads your `CLAUDE.md` instructions, and interprets the raw data
+3. You get a **formatted worklog** with estimated times, categorized by client and ticket
+
+Just ask in natural language:
+- *"What did I do today?"*
+- *"Give me yesterday's worklog"*
+- *"What did I work on last Friday?"*
 
 ## Features
 
@@ -32,6 +38,7 @@ The script queries your ActivityWatch database, extracts activities (apps, brows
 
 ### Prerequisites
 
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (CLI)
 - Python 3
 - [ActivityWatch](https://activitywatch.net/) running and collecting data
 
@@ -50,18 +57,23 @@ Edit `config.json` with your details:
 
 ### Usage
 
+Open Claude Code in the repo directory and just ask:
+
+```
+> What did I do today?
+> Give me yesterday's worklog
+> What did I work on on 24.02.2026?
+```
+
+Claude reads the `CLAUDE.md` instructions, runs the script, interprets the raw data, and outputs a formatted worklog table.
+
+You can also run the script directly:
+
 ```bash
-# Today's worklog (AI-friendly output)
-python worklog_db.py today --ai
-
-# Yesterday
-python worklog_db.py yesterday --ai
-
-# Specific date
-python worklog_db.py 24.02.2026 --ai
-
-# Detailed output (without AI formatting)
-python worklog_db.py today
+python worklog_db.py today --ai       # AI-friendly compact output
+python worklog_db.py yesterday --ai   # Yesterday's activity
+python worklog_db.py 24.02.2026 --ai  # Specific date
+python worklog_db.py today            # Detailed raw output
 ```
 
 ### Date formats
