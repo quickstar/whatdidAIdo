@@ -6,14 +6,10 @@ An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.n
 
 ## How it works
 
-```mermaid
-flowchart LR
-    AW[ActivityWatch] --> DB[SQLite DB] --> CC[Claude Code] --> WL[Worklog]
-
-    style AW fill:#4a9eff,color:#fff
-    style DB fill:#6c757d,color:#fff
-    style CC fill:#a855f7,color:#fff
-    style WL fill:#22c55e,color:#fff
+```
+ActivityWatch  →  SQLite DB  →  Claude Code  →  Worklog
+(tracks your      (raw           (runs script     (ready to
+ activity)         events)        & interprets)    submit)
 ```
 
 1. **ActivityWatch** silently tracks your window activity, browser tabs, and AFK status
