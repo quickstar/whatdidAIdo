@@ -8,13 +8,13 @@ A CLI tool that reads your [ActivityWatch](https://activitywatch.net/) data and 
 
 ```mermaid
 flowchart LR
-    AW["🖥️ ActivityWatch\n(tracks your activity)"]
-    DB["🗄️ SQLite DB\n(raw events)"]
-    WDAID["⚙️ whatdidAIdo\n(extracts & categorizes)"]
-    AI["🤖 AI\n(interprets & estimates)"]
-    WL["📋 Worklog\n(ready to submit)"]
+    AW[ActivityWatch] --> DB[SQLite DB] --> WDAID[whatdidAIdo] --> AI[AI] --> WL[Worklog]
 
-    AW --> DB --> WDAID --> AI --> WL
+    style AW fill:#4a9eff,color:#fff
+    style DB fill:#6c757d,color:#fff
+    style WDAID fill:#ff6b6b,color:#fff
+    style AI fill:#a855f7,color:#fff
+    style WL fill:#22c55e,color:#fff
 ```
 
 The script queries your ActivityWatch database, extracts activities (apps, browser history, git branches, meetings), and outputs a structured summary. Feed that to an AI (Claude, ChatGPT, etc.) and get back a formatted worklog with time estimates.
