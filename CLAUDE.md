@@ -41,6 +41,7 @@ To estimate actual development time for a ticket:
 2. Look at **Git Branches** - which ticket branch was active
 3. Look at **Window Context** - confirms what was being worked on
 4. Attribute the dev app time to the dominant ticket
+5. **Always check git log** for the date — commit timestamps reveal work not captured by ActivityWatch (e.g. evening sessions, idle-screen commits)
 
 **Example:**
 ```
@@ -51,6 +52,23 @@ Window Context shows: Translation Caching work
 
 → Estimate: ITEM-3049 = 4.5h (sum of dev app times)
 ```
+
+### Git Log Cross-Reference
+
+Always run the git log for the repos in `D:\git\` to supplement AW data:
+
+```bash
+git -C "D:\git\rooms" log --all --after="YYYY-MM-DD 23:59" --before="YYYY-MM-DD 00:00" --author="Lukas" --format="%h %ad %s" --date=format:"%H:%M"
+```
+
+**How to use commit times:**
+1. Map each commit to an AW activity window (or flag it as untracked if outside all windows)
+2. Commits that fall inside a break period = AW missed that work (screen idle but user was coding)
+3. Commits after the last AW window = separate untracked session — estimate duration from commit cluster span
+4. Group commits by topic/ticket and sum estimated session time per group
+
+**Known repos to check:**
+- `D:\git\rooms` — 3V-ROOMS main product
 
 ### Output Format
 
