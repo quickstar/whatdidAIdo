@@ -39,7 +39,7 @@ def get_db_path():
         return CONFIG['database']
 
     # 3. Fallback default
-    return r"C:\Users\Lukas\OneDrive\ActivityWatchSync\andromeda\1750b5f1-5fee-4977-b0f5-4f433e976517\test.db"
+    return r"C:\Users\Lukas\AppData\Local\activitywatch\aw-server-rust\sqlite.db"
 
 
 def load_config(config_path):
