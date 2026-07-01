@@ -2,18 +2,18 @@
 
 > You know what you did. Your AI does too.
 
-An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.net/). Open [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in the repo, ask *"what did I do yesterday?"*, and get a clean worklog table — no manual time tracking needed.
+An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.net/). Open an AI coding agent such as Codex or Claude Code in the repo, ask *"what did I do yesterday?"*, and get a clean worklog table — no manual time tracking needed.
 
 ## How it works
 
 ```
-ActivityWatch  →  SQLite DB  →  Claude Code  →  Worklog
+ActivityWatch  →  SQLite DB  →  AI Agent  →  Worklog
 (tracks your      (raw           (runs script     (ready to
  activity)         events)        & interprets)    submit)
 ```
 
 1. **ActivityWatch** silently tracks your window activity, browser tabs, and AFK status
-2. **Claude Code** runs the analysis script, reads your `CLAUDE.md` instructions, and interprets the raw data
+2. **Your AI agent** runs the analysis script, reads the repo agent instructions, and interprets the raw data
 3. You get a **formatted worklog** with estimated times, categorized by client and ticket
 
 Just ask in natural language:
@@ -34,15 +34,15 @@ Just ask in natural language:
 
 ### Prerequisites
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (CLI)
+- An AI coding agent that can run shell commands and read repository files, such as Codex or [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - Python 3
 - [ActivityWatch](https://activitywatch.net/) running and collecting data
 
 ### Setup
 
+Clone this repository and open its directory in your terminal or AI agent, then create a local config:
+
 ```bash
-git clone https://github.com/quickstar/whatdidAIdo.git
-cd whatdidAIdo
 cp config.example.json config.json
 ```
 
@@ -53,7 +53,7 @@ Edit `config.json` with your details:
 
 ### Usage
 
-Open Claude Code in the repo directory and just ask:
+Open your AI coding agent in the repo directory and just ask:
 
 ```
 > What did I do today?
@@ -61,7 +61,7 @@ Open Claude Code in the repo directory and just ask:
 > What did I work on on 24.02.2026?
 ```
 
-Claude reads the `CLAUDE.md` instructions, runs the script, interprets the raw data, and outputs a formatted worklog table.
+Agents should read `AGENTS.md`. Claude Code can use `CLAUDE.md`, which imports the same shared instructions. The agent runs the script, interprets the raw data, and outputs a formatted worklog table.
 
 You can also run the script directly:
 
