@@ -7,14 +7,15 @@ An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.n
 ## How it works
 
 ```
-ActivityWatch  →  SQLite DB  →  AI Agent  →  Worklog
-(tracks your      (raw           (runs script     (ready to
- activity)         events)        & interprets)    submit)
+ActivityWatch ─┐
+Codex history ─┼→ Analyzer → AI Agent → Worklog
+Git history ───┘   (evidence)  (interprets)  (ready to submit)
 ```
 
 1. **ActivityWatch** silently tracks your window activity, browser tabs, and AFK status
-2. **Your AI agent** runs the analysis script, reads the repo agent instructions, and interprets the raw data
-3. You get a **formatted worklog** with estimated times, categorized by client and ticket
+2. **Codex history** contributes root-task titles, repositories, branches, tickets, and outcomes when available
+3. **Your AI agent** runs the analysis script, cross-checks git, and interprets the combined evidence
+4. You get a **formatted worklog** with estimated times, categorized by client and ticket
 
 Just ask in natural language:
 - *"What did I do today?"*
@@ -27,6 +28,7 @@ Just ask in natural language:
 - **Client detection** — Maps domains and keywords to clients automatically
 - **Meeting grouping** — Correlates Teams meetings with contacts and clients
 - **Git branch tracking** — Knows which ticket you were working on based on your active branch
+- **Codex task context** — Reads local root-task history while excluding delegated subagents
 - **Break detection** — Identifies gaps in activity (lunch, coffee, etc.)
 - **Smart context** — Distinguishes work YouTube (tutorials) from personal YouTube based on surrounding activity
 
@@ -48,6 +50,7 @@ cp config.example.json config.json
 
 Edit `config.json` with your details:
 - Set your `database` path to the ActivityWatch SQLite database
+- Optionally set `codex_home`; otherwise `CODEX_HOME` or `~/.codex` is used
 - Add your `clients`, `contacts`, and `correlations`
 - Add `known_tickets` for better descriptions
 
@@ -70,6 +73,7 @@ python worklog_db.py today --ai       # AI-friendly compact output
 python worklog_db.py yesterday --ai   # Yesterday's activity
 python worklog_db.py 24.02.2026 --ai  # Specific date
 python worklog_db.py today            # Detailed raw output
+python worklog_db.py today --no-codex # ActivityWatch only
 ```
 
 ### Date formats
@@ -83,6 +87,7 @@ All of these work: `24.02.2026`, `2026-02-24`, `24/02/2026`, `today`, `yesterday
 | Section | Purpose |
 |---------|---------|
 | `database` | Path to your ActivityWatch SQLite DB |
+| `codex_home` | Optional Codex data directory; defaults to `CODEX_HOME` or `~/.codex` |
 | `clients` | Keyword → client name mapping (e.g. `"acme": "Acme Corp"`) |
 | `contacts` | Person → company mapping for meeting grouping |
 | `correlations` | Links clients to contacts for meeting attribution |
@@ -115,17 +120,31 @@ Raw detection times (how long a browser tab or window was in focus) don't equal 
 1. **App times** — Total time in IDEs, terminals, git tools = actual dev time
 2. **Git branches** — Which ticket branch was active = where dev time goes
 3. **Window context** — File names and titles confirm what was being worked on
-4. **Meeting duration** — Teams/calendar events = meeting time
+4. **Codex tasks** — Root-task titles, repositories, branches, tickets, and outcomes explain the work
+5. **Meeting duration** — Teams/calendar events = meeting time
 
 A ticket might show 20 minutes of raw browser time, but if the IDE was open for 4 hours on that ticket's branch, the real dev time is ~4 hours.
 
+### Codex history and time
+
+When local Codex state is available, the analyzer reads `state_5.sqlite` and the referenced rollout JSONL files. It includes user-owned root tasks, including older tasks reopened on the requested date, and excludes subagents and automations to avoid obvious double counting.
+
+Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with ActivityWatch `not-afk` intervals. Final estimates must remain anchored in ActivityWatch and git evidence. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
+
 ## Database Location
 
-The script looks for the database in this order:
+The script looks for the ActivityWatch database in this order:
 
 1. `--db` CLI argument
 2. `AW_DATABASE` environment variable
 3. `database` field in `config.json`
+
+It resolves the Codex data directory separately in this order:
+
+1. `--codex-home` CLI argument
+2. `CODEX_HOME` environment variable
+3. `codex_home` field in `config.json`
+4. `~/.codex`
 
 ## License
 

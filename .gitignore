@@ -1,3 +1,5 @@
 aw-buckets-export.json
 config.json
 *.db
+__pycache__/
+*.py[cod]

@@ -1,6 +1,6 @@
 # ActivityWatch Worklog Analyzer - Agent Guide
 
-This repository contains tools for turning ActivityWatch data into worklog summaries.
+This repository contains tools for turning ActivityWatch, Codex, and git evidence into worklog summaries.
 
 ## Purpose
 
@@ -8,7 +8,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 ## Important Files
 
-- `worklog_db.py` - Primary script. Reads the ActivityWatch SQLite database directly.
+- `worklog_db.py` - Primary script. Reads ActivityWatch plus local Codex root-task history.
 - `worklog.py` - Legacy script that reads `aw-buckets-export.json`.
 - `config.json` - Local configuration for database path, clients, contacts, correlations, projects, and ticket metadata.
 - `config.example.json` - Template for new setups.
@@ -28,6 +28,31 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 3. Interpret the script output. Raw ticket detections are signals, not final billable time.
 4. Cross-check relevant git history for the date when estimating development time.
 5. Return the final worklog as a markdown table with clickable Jira links.
+
+## MOCO Time Entry Creation
+
+When the user asks to create the interpreted worklog in MOCO:
+
+- Check existing activities for the date first and never create duplicate time entries.
+- Re-read the activities for the date immediately before creating or repairing entries. Preserve manual user edits to durations, projects, tasks, and billability unless the requested correction explicitly requires changing them.
+- For every Jira activity, inspect the Jira issue before selecting the MOCO project. Use the Jira Service Management Organizations field (`customfield_10002`), reporter/customer name and email domain, description, all comments, and linked issues to determine the customer.
+- For linked `ITEM-*` implementation work, inherit the customer attribution when the issue description or links establish that it originated from a customer `ROMSD-*` ticket, pilot, or request.
+- Search the contracted MOCO projects for that customer's dedicated current-year W&S project and use its matching active task, normally `Entwicklung`. Determine billability from the selected project and nearby entries.
+- Always inspect the Jira issue type and content before setting billability. Customer-reported defects are non-billable: this includes Jira type `Bug`, service-desk `Incident` tickets that describe faulty product behavior, and tickets linked to such a defect. Log the time on the correct customer project but set the MOCO activity to non-billable. A project's default billability and a non-`Bug` Jira type must never override the actual defect classification.
+- `INTERN-W&S ROOMS-<year>` is the global fallback only after confirming that the Jira evidence identifies no customer or that MOCO has no matching dedicated W&S project. Never select it merely because a ticket prefix or local config mapping is missing.
+- For an activity associated with one Jira ticket, create it with a clickable external-ticket link, not only a plain `tag`.
+- Prefer creating ticketed activities atomically through the MOCO REST API using `MOCO_API_KEY` and these fields:
+  - `tag`: the Jira key, for example `ROMSD-6601`.
+  - `remote_service`: `jira`.
+  - `remote_id`: the Jira key.
+  - `remote_url`: `https://3volutions.atlassian.net/browse/<JIRA-KEY>`.
+- `MOCO_API_KEY` is configured globally in the Windows User environment, but a managed sandbox can hide it from both `$env:MOCO_API_KEY` and non-elevated User/Machine environment lookups. Do not conclude that the key is missing from a sandboxed lookup and do not switch to browser automation for that reason.
+- Resolve the key without printing it: check `$env:MOCO_API_KEY`, then `[Environment]::GetEnvironmentVariable('MOCO_API_KEY', 'User')`, then the equivalent `'Machine'` lookup. If the process value is empty or the sandbox hides the global scopes, rerun the lookup and MOCO REST request with `sandbox_permissions: "require_escalated"`; the elevated command can read the global Windows value. Keep it only in a local variable and use it in the `Authorization` header.
+- The MOCO MCP `create_activity` tool currently does not expose the `remote_*` fields. If it is used to create a ticketed activity, immediately update that same activity through `PUT /api/v1/activities/<id>`; do not delete and recreate it.
+- After creation or repair, read the activities back and verify that every ticketed entry has the intended non-empty `remoteUrl`, correct duration, project, task, and billability.
+- Never create a MOCO activity shorter than 0.25 hours (900 seconds). Consolidate short related work when project, task, and attribution remain accurate; otherwise omit it or ask rather than creating a sub-15-minute entry.
+- One MOCO activity supports one external ticket link. Prefer one activity per Jira ticket when separate ticket attribution is supported by the evidence; do not claim multiple ticket references in one description are all clickable.
+- Never print or return the value of `MOCO_API_KEY`.
 
 ## Command Rules
 
@@ -64,6 +89,7 @@ It usually includes:
 - Categorized summary with raw detection times.
 - Meetings grouped by client using `contacts` and `correlations` from `config.json`.
 - Jira tickets detected from browser URLs, window titles, and git branches.
+- Codex root tasks with workspace, branch, ticket, completion context, task span, and non-AFK overlap.
 - App times for IDEs, terminals, browsers, Teams, git tools, and other apps.
 - Git branch activity with ticket extraction.
 - Window context for files, features, PRs, tickets, and browser pages.
@@ -80,12 +106,15 @@ Estimate development time from:
 - Git tool time such as `GitExtensions.exe`.
 - Active git branch names and ticket IDs.
 - Window titles, file names, and surrounding context.
+- Codex root-task titles and outcomes for semantic attribution.
 
 General rules:
 
 - `ITEM-*` tickets are usually feature development. Attribute the relevant development session time to the dominant active ticket.
 - `ROMSD-*` tickets are usually bug investigation or support. Use raw detection time only when the surrounding app/window context does not show a larger development session.
 - If one ticket branch dominates a development session, assign the IDE, terminal, and git time for that session to that ticket.
+- Codex task spans can overlap or continue in the background. Never sum them as billable time; use their titles/outcomes to identify the work and ActivityWatch `not-afk` plus git evidence to estimate duration.
+- The analyzer excludes Codex subagents and automations. Do not reintroduce their durations manually unless independent foreground or git evidence requires it.
 - If activity is ambiguous during an otherwise clear coding session, treat technical browsing as work-related.
 - Billable time is usually around 85 percent of total active time unless the evidence suggests otherwise.
 
@@ -205,6 +234,7 @@ Common apps:
 - `rider64.exe` - JetBrains Rider.
 - `datagrip64.exe` - DataGrip.
 - `GitExtensions.exe` - Git operations.
+- `ChatGPT.exe` / `Codex.exe` - Codex tasks; use local task history to identify their work context.
 - `msedge.exe` / `zen.exe` - Browsers.
 - `ms-teams.exe` - Meetings and chat.
 - `mstsc.exe` - Remote Desktop.

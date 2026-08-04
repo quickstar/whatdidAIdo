@@ -1,5 +1,6 @@
 {
   "database": "C:\\path\\to\\your\\activitywatch\\aw-server\\peewee-sqlite.v2.db",
+  "codex_home": "C:\\Users\\you\\.codex",
 
   "clients": {
     "acme": "Acme Corp",
