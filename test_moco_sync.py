@@ -81,6 +81,7 @@ class MocoSyncTests(unittest.TestCase):
         self.assertEqual('unchanged', second['results'][0]['action'])
         self.assertEqual(1, len(client.created))
         self.assertEqual('jira', client.records[0]['remote_service'])
+        self.assertEqual('ROMSD-1', client.records[0]['tag'])
         self.assertEqual('https://example.atlassian.net/browse/ROMSD-1', client.records[0]['remote_url'])
 
     def test_differing_existing_activity_is_preserved_without_explicit_update(self):
@@ -125,6 +126,79 @@ class MocoSyncTests(unittest.TestCase):
         self.assertEqual('created', first['results'][0]['action'])
         self.assertEqual('unchanged', second['results'][0]['action'])
         self.assertNotIn('remote_service', client.records[0])
+        self.assertEqual('', client.records[0]['tag'])
+
+    def test_legacy_non_ticket_sync_key_tag_is_removed_on_explicit_update(self):
+        legacy = {
+            'id': '42',
+            'date': '2026-07-28',
+            'project': {'id': '100'},
+            'task': {'id': '200'},
+            'seconds': 3600,
+            'description': 'Refinement',
+            'billable': True,
+            'tag': 'acme-refinement',
+        }
+        meeting = {
+            'date': '2026-07-28',
+            'activities': [{
+                'sync_key': 'acme-refinement',
+                'customer': 'FFHS',
+                'description': 'Refinement',
+                'hours': 1,
+                'billable': True,
+            }],
+        }
+        client = FakeClient([legacy])
+        dry_run = moco_sync.synchronize(client, meeting, CONFIG)
+        updated = moco_sync.synchronize(client, meeting, CONFIG, apply=True, update_existing=True)
+        self.assertEqual('preserved-existing', dry_run['results'][0]['action'])
+        self.assertEqual({'current': 'acme-refinement', 'desired': ''}, dry_run['results'][0]['differences']['tag'])
+        self.assertEqual('updated', updated['results'][0]['action'])
+        self.assertEqual('', client.records[0]['tag'])
+
+    def test_non_ticket_natural_identity_survives_duration_change_without_tag(self):
+        meeting = {
+            'date': '2026-07-28',
+            'activities': [{
+                'sync_key': 'acme-refinement',
+                'customer': 'FFHS',
+                'description': 'Refinement',
+                'hours': 1,
+                'billable': True,
+            }],
+        }
+        client = FakeClient()
+        moco_sync.synchronize(client, meeting, CONFIG, apply=True)
+        meeting['activities'][0]['hours'] = 1.25
+        result = moco_sync.synchronize(client, meeting, CONFIG)
+        self.assertEqual('preserved-existing', result['results'][0]['action'])
+        self.assertEqual({'current': 3600, 'desired': 4500}, result['results'][0]['differences']['seconds'])
+
+    def test_non_ticket_natural_identity_survives_manual_project_change(self):
+        moved = {
+            'id': '42',
+            'date': '2026-07-28',
+            'project': {'id': '999'},
+            'task': {'id': '888'},
+            'seconds': 3600,
+            'description': 'Refinement',
+            'billable': True,
+            'tag': '',
+        }
+        meeting = {
+            'date': '2026-07-28',
+            'activities': [{
+                'sync_key': 'acme-refinement',
+                'customer': 'FFHS',
+                'description': 'Refinement',
+                'hours': 1,
+                'billable': True,
+            }],
+        }
+        result = moco_sync.synchronize(FakeClient([moved]), meeting, CONFIG)
+        self.assertEqual('preserved-existing', result['results'][0]['action'])
+        self.assertEqual({'current': 999, 'desired': 100}, result['results'][0]['differences']['project_id'])
 
 
 if __name__ == '__main__':

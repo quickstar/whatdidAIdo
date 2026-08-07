@@ -77,8 +77,9 @@ When the user asks to create the interpreted worklog in MOCO:
   python moco_sync.py <approved-worklog>.json --apply
   ```
 
-  The helper reads existing activities before writing, matches by
-  `date + remote_id` with a tag fallback, creates native Jira links, resolves
+  The helper reads existing activities before writing, matches Jira activities by
+  `date + remote_id` and non-Jira activities by their stable natural identity,
+  creates native Jira links, writes visible tags only for Jira-backed activities, resolves
   `MOCO_API_KEY` without printing it, and verifies stored values after changes.
   If sandboxing hides the global Windows key or blocks the API, rerun the helper
   with elevated sandbox permission; never switch to browser automation for that

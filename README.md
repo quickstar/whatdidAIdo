@@ -95,7 +95,9 @@ python moco_sync.py approved-worklog.json --apply
 Existing entries are preserved unless `--update-existing --apply` is explicitly
 used. `MOCO_API_KEY` is read from the process or Windows User/Machine environment
 and is never printed. Non-ticket meetings or administrative entries are also
-supported when they provide a stable `sync_key` for duplicate detection.
+supported when they provide a stable `sync_key` for duplicate detection. The
+sync key is not written as a visible MOCO tag; only Jira-backed activities are
+tagged.
 
 ### Date formats
 

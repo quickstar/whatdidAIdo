@@ -109,7 +109,9 @@ def desired_payload(activity, default_date, config):
         'seconds': seconds_from_activity(activity),
         'description': str(activity.get('description') or '').strip(),
         'billable': bool(activity['billable']),
-        'tag': str(activity.get('tag') or activity_key),
+        'tag': str(activity.get('tag') or ticket) if ticket else '',
+        '_activity_key': activity_key,
+        '_sync_key': sync_key,
         '_customer': customer_name,
         '_project_name': mapping.get('project_name'),
         '_task_name': mapping.get('task_name'),
@@ -172,22 +174,47 @@ def existing_remote_id(activity):
 
 def find_existing(activities, payload):
     ticket = str(payload.get('remote_id') or '').upper()
-    tag = str(payload.get('tag') or '').upper()
-    return next(
-        (
-            activity for activity in activities
-            if activity.get('date') == payload['date']
-            and (
-                (ticket and existing_remote_id(activity) == ticket)
-                or (
-                    str(activity.get('tag') or '').upper() == tag
-                    and int((activity.get('project') or {}).get('id') or activity.get('project_id') or 0)
-                    == int(payload['project_id'])
-                )
-            )
-        ),
-        None,
-    )
+    sync_key = str(payload.get('_sync_key') or '').upper()
+
+    def project_id(activity):
+        return int((activity.get('project') or {}).get('id') or activity.get('project_id') or 0)
+
+    def task_id(activity):
+        return int((activity.get('task') or {}).get('id') or activity.get('task_id') or 0)
+
+    same_date = [activity for activity in activities if activity.get('date') == payload['date']]
+    if ticket:
+        return next((activity for activity in same_date if existing_remote_id(activity) == ticket), None)
+
+    # Migration path for entries created before sync keys stopped being exposed
+    # as visible MOCO tags.
+    legacy_matches = [
+        activity for activity in same_date
+        if sync_key
+        and str(activity.get('tag') or '').upper() == sync_key
+        and project_id(activity) == int(payload['project_id'])
+    ]
+    if len(legacy_matches) == 1:
+        return legacy_matches[0]
+
+    # The sync key intentionally stays local. Match an untagged activity by its
+    # user-facing description, which remains stable even when somebody moves it
+    # to a more appropriate MOCO project or task after creation.
+    description_matches = [
+        activity for activity in same_date
+        if (activity.get('description') or '') == payload['description']
+    ]
+    if len(description_matches) == 1:
+        return description_matches[0]
+    if len(description_matches) > 1:
+        exact_matches = [
+            activity for activity in description_matches
+            if project_id(activity) == int(payload['project_id'])
+            and task_id(activity) == int(payload['task_id'])
+        ]
+        if len(exact_matches) == 1:
+            return exact_matches[0]
+    return None
 
 
 def comparable(activity):
@@ -241,16 +268,17 @@ def synchronize(client, worklog, config, apply=False, update_existing=False):
     results = []
 
     for payload in desired:
+        activity_key = payload['_activity_key']
         existing = find_existing(existing_by_date[payload['date']], payload)
         delta = differences(existing, payload) if existing else {}
         if existing and not delta:
-            results.append({'action': 'unchanged', 'id': existing.get('id'), 'key': payload['tag']})
+            results.append({'action': 'unchanged', 'id': existing.get('id'), 'key': activity_key})
             continue
         if existing and not update_existing:
             results.append({
                 'action': 'preserved-existing',
                 'id': existing.get('id'),
-                'key': payload['tag'],
+                'key': activity_key,
                 'differences': delta,
             })
             continue
@@ -258,7 +286,7 @@ def synchronize(client, worklog, config, apply=False, update_existing=False):
             results.append({
                 'action': 'would-update' if existing else 'would-create',
                 'id': existing.get('id') if existing else None,
-                'key': payload['tag'],
+                'key': activity_key,
                 'project': payload.get('_project_name'),
                 'task': payload.get('_task_name'),
                 'seconds': payload['seconds'],
@@ -273,20 +301,21 @@ def synchronize(client, worklog, config, apply=False, update_existing=False):
             record = client.create_activity(payload)
             action = 'created'
             existing_by_date[payload['date']].append(record)
-        results.append({'action': action, 'id': record.get('id'), 'key': payload['tag']})
+        results.append({'action': action, 'id': record.get('id'), 'key': activity_key})
 
     verification = {}
     if apply:
         for activity_date in dates:
             verification[activity_date] = client.activities(activity_date)
         for payload in desired:
+            activity_key = payload['_activity_key']
             stored = find_existing(verification[payload['date']], payload)
             if not stored:
-                raise RuntimeError(f"Verification failed: {payload['tag']} is missing after synchronization.")
+                raise RuntimeError(f"Verification failed: {activity_key} is missing after synchronization.")
             delta = differences(stored, payload)
-            matching_result = next(item for item in results if item['key'] == payload['tag'])
+            matching_result = next(item for item in results if item['key'] == activity_key)
             if matching_result['action'] in ('created', 'updated', 'unchanged') and delta:
-                raise RuntimeError(f"Verification failed for {payload['tag']}: {json.dumps(delta, ensure_ascii=False)}")
+                raise RuntimeError(f"Verification failed for {activity_key}: {json.dumps(delta, ensure_ascii=False)}")
 
     return {'date': default_date, 'apply': apply, 'results': results}
 
