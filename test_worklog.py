@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 
-import worklog_db
+import worklog
 
 
 def epoch(year, month, day, hour, minute=0):
@@ -20,14 +20,14 @@ def iso_timestamp(value):
 
 class CodexHistoryTests(unittest.TestCase):
     def setUp(self):
-        self.original_config = worklog_db.CONFIG
-        worklog_db.CONFIG = {
+        self.original_config = worklog.CONFIG
+        worklog.CONFIG = {
             'ticket_prefixes': {'ITEM': 'Feature', 'ROMSD': 'Bug'},
             'projects': {'rooms': '3V-ROOMS'},
         }
 
     def tearDown(self):
-        worklog_db.CONFIG = self.original_config
+        worklog.CONFIG = self.original_config
 
     def create_state_database(self, codex_home):
         connection = sqlite3.connect(codex_home / 'state_5.sqlite')
@@ -125,7 +125,7 @@ class CodexHistoryTests(unittest.TestCase):
             connection.close()
 
             active_intervals = [(datetime(2026, 1, 15, 9, 10), 600)]
-            tasks = worklog_db.analyze_codex_history(
+            tasks = worklog.analyze_codex_history(
                 codex_home,
                 target_date,
                 active_intervals,
@@ -157,7 +157,7 @@ class CodexHistoryTests(unittest.TestCase):
 
         output = io.StringIO()
         with redirect_stdout(output):
-            worklog_db.print_codex_tasks_ai([task])
+            worklog.print_codex_tasks_ai([task])
 
         rendered = output.getvalue()
         self.assertIn('semantic context; spans and overlaps may overlap', rendered)

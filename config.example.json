@@ -2,6 +2,32 @@
   "database": "C:\\path\\to\\your\\activitywatch\\aw-server\\peewee-sqlite.v2.db",
   "codex_home": "C:\\Users\\you\\.codex",
 
+  "github": {
+    "login": "your-github-login",
+    "timezone": "Europe/Zurich",
+    "repositories_root": "D:\\git",
+    "git_authors": ["Your Name", "your-github-login"]
+  },
+
+  "moco": {
+    "base_url": "https://example.mocoapp.com",
+    "jira_base_url": "https://example.atlassian.net/browse",
+    "customer_aliases": {
+      "Acme Corp.": "Acme",
+      "acme.example": "Acme"
+    },
+    "customer_projects": {
+      "2026": {
+        "Acme": {
+          "project_id": "123456",
+          "project_name": "W&S 2026 - Acme",
+          "task_id": "789012",
+          "task_name": "Development"
+        }
+      }
+    }
+  },
+
   "clients": {
     "acme": "Acme Corp",
     "globex": "Globex Inc"

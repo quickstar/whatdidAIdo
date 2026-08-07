@@ -8,14 +8,15 @@ An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.n
 
 ```
 ActivityWatch ─┐
-Codex history ─┼→ Analyzer → AI Agent → Worklog
-Git history ───┘   (evidence)  (interprets)  (ready to submit)
+Codex history ─┼→ Evidence audit → AI Agent → Worklog → MOCO sync
+GitHub + git ──┘     (complete)    (interprets)  (approved) (idempotent)
 ```
 
 1. **ActivityWatch** silently tracks your window activity, browser tabs, and AFK status
 2. **Codex history** contributes root-task titles, repositories, branches, tickets, and outcomes when available
-3. **Your AI agent** runs the analysis script, cross-checks git, and interprets the combined evidence
-4. You get a **formatted worklog** with estimated times, categorized by client and ticket
+3. **GitHub and local git** contribute every discovered repository, commit diff, push/rewrite, PR, review, and unpublished commit
+4. **Your AI agent** interprets the combined evidence using deterministic session rules
+5. An approved worklog can be synchronized to **MOCO** without duplicates and with native Jira links
 
 Just ask in natural language:
 - *"What did I do today?"*
@@ -28,7 +29,10 @@ Just ask in natural language:
 - **Client detection** — Maps domains and keywords to clients automatically
 - **Meeting grouping** — Correlates Teams meetings with contacts and clients
 - **Git branch tracking** — Knows which ticket you were working on based on your active branch
+- **Complete GitHub audit** — Combines commit search, events, PRs, push comparisons, and local repositories
+- **Rewrite awareness** — Inspects rebases/squashes without double-counting the replacement commit
 - **Codex task context** — Reads local root-task history while excluding delegated subagents
+- **Idempotent MOCO sync** — Preserves existing entries by default and verifies Jira links after writes
 - **Break detection** — Identifies gaps in activity (lunch, coffee, etc.)
 - **Smart context** — Distinguishes work YouTube (tutorials) from personal YouTube based on surrounding activity
 
@@ -39,6 +43,7 @@ Just ask in natural language:
 - An AI coding agent that can run shell commands and read repository files, such as Codex or [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - Python 3
 - [ActivityWatch](https://activitywatch.net/) running and collecting data
+- [GitHub CLI](https://cli.github.com/) authenticated for the repositories to audit
 
 ### Setup
 
@@ -53,6 +58,8 @@ Edit `config.json` with your details:
 - Optionally set `codex_home`; otherwise `CODEX_HOME` or `~/.codex` is used
 - Add your `clients`, `contacts`, and `correlations`
 - Add `known_tickets` for better descriptions
+- Configure `github.repositories_root` and author aliases
+- Add confirmed year-specific MOCO project/task mappings when MOCO sync is used
 
 ### Usage
 
@@ -69,12 +76,26 @@ Agents should read `AGENTS.md`. Claude Code can use `CLAUDE.md`, which imports t
 You can also run the script directly:
 
 ```bash
-python worklog_db.py today --ai       # AI-friendly compact output
-python worklog_db.py yesterday --ai   # Yesterday's activity
-python worklog_db.py 24.02.2026 --ai  # Specific date
-python worklog_db.py today            # Detailed raw output
-python worklog_db.py today --no-codex # ActivityWatch only
+python worklog.py today --ai       # AI-friendly compact output
+python worklog.py yesterday --ai   # Yesterday's activity
+python worklog.py 24.02.2026 --ai  # Specific date
+python worklog.py today            # Detailed raw output
+python worklog.py today --no-codex # ActivityWatch only
+python github_audit.py today --ai     # GitHub, PR, push/rewrite, and local git evidence
 ```
+
+To synchronize an approved JSON worklog, copy `worklog.example.json`, fill in
+the Jira-derived customer and billability values, dry-run it, and then apply:
+
+```bash
+python moco_sync.py approved-worklog.json
+python moco_sync.py approved-worklog.json --apply
+```
+
+Existing entries are preserved unless `--update-existing --apply` is explicitly
+used. `MOCO_API_KEY` is read from the process or Windows User/Machine environment
+and is never printed. Non-ticket meetings or administrative entries are also
+supported when they provide a stable `sync_key` for duplicate detection.
 
 ### Date formats
 
@@ -88,6 +109,8 @@ All of these work: `24.02.2026`, `2026-02-24`, `24/02/2026`, `today`, `yesterday
 |---------|---------|
 | `database` | Path to your ActivityWatch SQLite DB |
 | `codex_home` | Optional Codex data directory; defaults to `CODEX_HOME` or `~/.codex` |
+| `github` | Login, timezone, local repository root, and git author aliases |
+| `moco.customer_projects` | Confirmed year-specific customer project/task IDs for synchronization |
 | `clients` | Keyword → client name mapping (e.g. `"acme": "Acme Corp"`) |
 | `contacts` | Person → company mapping for meeting grouping |
 | `correlations` | Links clients to contacts for meeting attribution |
@@ -103,7 +126,7 @@ See [`config.example.json`](config.example.json) for a full template.
 
 The `--ai` flag produces a compact summary that an AI can interpret into a worklog like this:
 
-**08:30 - 17:15 (7.5h active) | Lunch: 12:00 - 12:30 (30m)**
+**Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h | GitHub activity through 21:27**
 
 | Cat | Client/Ticket | Description | Time |
 |-----|---------------|-------------|------|
@@ -117,19 +140,22 @@ The `--ai` flag produces a compact summary that an AI can interpret into a workl
 
 Raw detection times (how long a browser tab or window was in focus) don't equal actual work time. The AI uses multiple signals:
 
-1. **App times** — Total time in IDEs, terminals, git tools = actual dev time
+1. **App times** — Foreground IDE, terminal, and git-tool intervals provide session evidence
 2. **Git branches** — Which ticket branch was active = where dev time goes
 3. **Window context** — File names and titles confirm what was being worked on
 4. **Codex tasks** — Root-task titles, repositories, branches, tickets, and outcomes explain the work
-5. **Meeting duration** — Teams/calendar events = meeting time
+5. **GitHub audit** — Commit diffs, push/rewrite events, PRs, and reviews reveal sessions ActivityWatch missed
+6. **Meeting duration** — Explicitly supplied calendar evidence can establish attended meeting time
 
-A ticket might show 20 minutes of raw browser time, but if the IDE was open for 4 hours on that ticket's branch, the real dev time is ~4 hours.
+A ticket might show 20 minutes of raw browser time while a coherent foreground,
+Codex, and commit sequence supports a longer development session. An application
+merely remaining open is never enough to count the intervening gap.
 
 ### Codex history and time
 
 When local Codex state is available, the analyzer reads `state_5.sqlite` and the referenced rollout JSONL files. It includes user-owned root tasks, including older tasks reopened on the requested date, and excludes subagents and automations to avoid obvious double counting.
 
-Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with ActivityWatch `not-afk` intervals. Final estimates must remain anchored in ActivityWatch and git evidence. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
+Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with ActivityWatch `not-afk` intervals. The agent splits unsupported gaps, unions accepted intervals to prevent double counting, rounds only after attribution, and labels medium/low-confidence estimates. Contractual billability comes from Jira/MOCO rules—never a percentage of ActivityWatch time. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
 
 ## Database Location
 

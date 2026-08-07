@@ -3,3 +3,5 @@ config.json
 *.db
 __pycache__/
 *.py[cod]
+github-audit*.json
+approved-worklog*.json

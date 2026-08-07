@@ -1,0 +1,19 @@
+{
+  "date": "2026-07-28",
+  "activities": [
+    {
+      "ticket": "BUG-456",
+      "customer": "Acme",
+      "description": "Correct session timeout handling and add regression coverage",
+      "hours": 2.5,
+      "billable": false
+    },
+    {
+      "sync_key": "acme-refinement",
+      "customer": "Acme",
+      "description": "Backlog refinement",
+      "hours": 1.0,
+      "billable": true
+    }
+  ]
+}
