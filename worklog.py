@@ -156,6 +156,11 @@ def merge_intervals(intervals):
     return merged
 
 
+def interval_total_seconds(intervals):
+    """Return the duration of a merged interval union."""
+    return sum(end - start for start, end in merge_intervals(intervals))
+
+
 def interval_overlap_seconds(left_intervals, right_intervals):
     """Calculate overlap between two collections of timestamp intervals."""
     left = merge_intervals(left_intervals)
@@ -173,6 +178,47 @@ def interval_overlap_seconds(left_intervals, right_intervals):
         else:
             right_index += 1
     return overlap
+
+
+CONCRETE_CODEX_OUTCOME_WORDS = (
+    'completed', 'implemented', 'fixed', 'committed', 'pushed', 'merged',
+    'verified', 'validated', 'built', 'build succeeded', 'tests passed',
+    'released', 'updated', 'created', 'diagnosed', 'analyzed', 'reviewed',
+    'refactored',
+    'cleanup completed',
+)
+
+
+def codex_task_supports_evidence_union(task):
+    """Conservatively select completed root tasks with concrete outcome evidence."""
+    if task.get('status') != 'completed' or len(task.get('tickets') or []) > 1:
+        return False
+    if not (task.get('tickets') or task.get('branch') or task.get('cwd')):
+        return False
+    outcome = str(task.get('outcome') or '').lower()
+    return bool(outcome) and any(word in outcome for word in CONCRETE_CODEX_OUTCOME_WORDS)
+
+
+def calculate_evidence_union(results):
+    """Build a conservative merged ActivityWatch + Codex interval candidate."""
+    active = [
+        (start.timestamp(), start.timestamp() + duration)
+        for start, duration in results.get('active_intervals', [])
+        if duration > 0
+    ]
+    accepted = list(active)
+    task_ids = []
+    for task in results.get('codex_tasks', []):
+        if not codex_task_supports_evidence_union(task):
+            continue
+        accepted.extend(task.get('spans') or [])
+        task_ids.append(task.get('thread_id'))
+    merged = merge_intervals(accepted)
+    return {
+        'evidence_union_intervals': merged,
+        'evidence_union_seconds': interval_total_seconds(merged),
+        'evidence_union_codex_task_ids': [task_id for task_id in task_ids if task_id],
+    }
 
 
 def compact_codex_text(value, limit=160):
@@ -371,20 +417,27 @@ def analyze_day(db_path, target_date):
             if file:
                 results['file_time'][file] += duration
 
-    # AFK status
+    # AFK status. ActivityWatch history/heartbeat rows can overlap, so never
+    # sum them directly; merge them into a non-overlapping union first.
     afk_bucket = buckets.get('aw-watcher-afk_andromeda')
+    raw_not_afk_intervals = []
     if afk_bucket:
         events = query_events(cursor, afk_bucket['id'], start_ns, end_ns)
         for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
             data = json.loads(data_json)
             status = data.get('status', '')
             if status == 'not-afk':
-                results['total_active'] += duration
-                ts = datetime.fromtimestamp(start / 1_000_000_000)
-                results['active_intervals'].append((ts, duration))
-                if duration >= 300:
-                    results['active_periods'].append((ts, duration))
+                raw_not_afk_intervals.append((start / 1_000_000_000, end / 1_000_000_000))
+
+    merged_not_afk = merge_intervals(raw_not_afk_intervals)
+    results['raw_total_active'] = sum(end - start for start, end in raw_not_afk_intervals)
+    results['total_active'] = interval_total_seconds(merged_not_afk)
+    for start, end in merged_not_afk:
+        duration = end - start
+        ts = datetime.fromtimestamp(start)
+        results['active_intervals'].append((ts, duration))
+        if duration >= 300:
+            results['active_periods'].append((ts, duration))
 
     results['active_periods'].sort()
     conn.close()
@@ -766,6 +819,16 @@ def print_ai_summary_v2(results, target_date):
 
     print(f"# Worklog Data for {date_str}")
     print(f"**Observed Interaction: {total_hours:.1f}h**")
+    raw_total = results.get('raw_total_active', results['total_active'])
+    overlap_removed = max(0, raw_total - results['total_active'])
+    if overlap_removed >= 1:
+        print(f"**Merged not-AFK overlap removed: {format_duration(overlap_removed)}**")
+    evidence_union = results.get('evidence_union_seconds', results['total_active'])
+    codex_union_count = len(results.get('evidence_union_codex_task_ids', []))
+    print(
+        f"**Evidence Union Candidate: {evidence_union / 3600:.1f}h "
+        f"(merged ActivityWatch + {codex_union_count} qualifying Codex root tasks; validate extensions)**"
+    )
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
@@ -1242,6 +1305,8 @@ Examples:
             target_date,
             results.get('active_intervals', []),
         )
+
+    results.update(calculate_evidence_union(results))
 
     if results['total_active'] == 0 and not results.get('codex_tasks'):
         print(f"\nNo activity found for {target_date.strftime('%Y-%m-%d')}")

@@ -5,3 +5,5 @@ __pycache__/
 *.py[cod]
 github-audit*.json
 approved-worklog*.json
+worklog-20??-??-??.json
+.moco-sync-state.json

@@ -38,7 +38,9 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    one known repository.
 4. If the GitHub helper reports coverage warnings, investigate only those gaps
    with focused `gh api` or local git calls. Do not repeat successful discovery
-   work manually.
+   work manually. If every online GitHub discovery seam failed for the same
+   sandbox/network reason, rerun the canonical helper once with elevated
+   network access instead of replacing it with many manual calls.
 5. For suspicious gaps, inspect the raw AFK and foreground-window intervals.
    Calls, reading, reviews, and agent supervision can be real work even when
    there is no recent keyboard or mouse input.
@@ -49,6 +51,11 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    Raw ticket detections, `not-afk` totals, GitHub event spans, and commit counts
    are signals, not final work duration or billability.
 8. Return the final worklog as a markdown table with clickable Jira links.
+9. Before presenting the table, ensure every row is directly serializable to
+   one MOCO activity: one customer, one project/task, one billability
+   classification, and at most one Jira ticket. Split mixed customer/internal,
+   billable/non-billable, or multi-ticket work before asking for approval while
+   preserving the evidence-derived total.
 
 ## MOCO Time Entry Creation
 
@@ -57,6 +64,11 @@ When the user asks to create the interpreted worklog in MOCO:
 - Treat the most recently presented worklog table as approved input. Do not
   silently re-estimate its tickets or durations while writing it. If newly read
   Jira or MOCO evidence creates a material conflict, stop and explain it.
+- The approved table must already be MOCO-homogeneous. Do not postpone splitting
+  a mixed row until synchronization; that would change the approved activity
+  structure. If a legacy approved row cannot map accurately to one customer,
+  project/task, billability value, and Jira link, stop and obtain approval for
+  the split.
 - For every Jira activity, inspect the Jira issue before selecting the MOCO project. Use the Jira Service Management Organizations field (`customfield_10002`), reporter/customer name and email domain, description, all comments, and linked issues to determine the customer.
 - For linked `ITEM-*` implementation work, inherit the customer attribution when the issue description or links establish that it originated from a customer `ROMSD-*` ticket, pilot, or request.
 - Resolve the customer's year-specific project and task from `config.json`
@@ -64,8 +76,16 @@ When the user asks to create the interpreted worklog in MOCO:
   MOCO projects, verify the active task (normally `Entwicklung`), and update the
   local mapping before synchronization.
 - Always inspect the Jira issue type and content before setting billability. Customer-reported defects are non-billable: this includes Jira type `Bug`, service-desk `Incident` tickets that describe faulty product behavior, and tickets linked to such a defect. Log the time on the correct customer project but set the MOCO activity to non-billable. A project's default billability and a non-`Bug` Jira type must never override the actual defect classification.
+- Customer-specific work without Jira, such as a deployment, meeting, or
+  operational task, also needs explicit billability evidence. Never inherit
+  billability from the MOCO project default. If the evidence does not establish
+  whether it is contract work, defect remediation, or internal overhead, ask
+  the user before synchronization.
 - `INTERN-W&S ROOMS-<year>` is the global fallback only after confirming that the Jira evidence identifies no customer or that MOCO has no matching dedicated W&S project. Never select it merely because a ticket prefix or local config mapping is missing.
-- Serialize the approved table using the structure in `worklog.example.json`.
+- Serialize the approved table as
+  `approved-worklog-<YYYY-MM-DD>.json` using the structure in
+  `worklog.example.json`. Set top-level `approved_total_hours` to the approved
+  table total; the synchronizer must reject a mismatched activity sum.
   A ticketed activity must have exactly one Jira ticket. A meeting/admin entry
   without Jira must instead have a stable, descriptive `sync_key`. Every entry
   also needs explicit evidence-derived `customer` and `billable` values,
@@ -78,7 +98,8 @@ When the user asks to create the interpreted worklog in MOCO:
   ```
 
   The helper reads existing activities before writing, matches Jira activities by
-  `date + remote_id` and non-Jira activities by their stable natural identity,
+  `date + remote_id` and non-Jira activities through a local MOCO-ID ledger with
+  a natural-identity migration fallback,
   creates native Jira links, writes visible tags only for Jira-backed activities, resolves
   `MOCO_API_KEY` without printing it, and verifies stored values after changes.
   If sandboxing hides the global Windows key or blocks the API, rerun the helper
@@ -89,6 +110,10 @@ When the user asks to create the interpreted worklog in MOCO:
   correction. Never delete and recreate an activity to repair it.
 - Never create a MOCO activity shorter than 0.25 hours (900 seconds). Consolidate short related work when project, task, and attribution remain accurate; otherwise omit it or ask rather than creating a sub-15-minute entry.
 - One MOCO activity supports one external ticket link. Prefer one activity per Jira ticket when separate ticket attribution is supported by the evidence; do not claim multiple ticket references in one description are all clickable.
+- Review the synchronizer's warnings and totals before applying. The desired
+  total must equal the approved total. When protected existing activities
+  differ, report both the desired total and the effective stored total so the
+  user can see what MOCO will actually contain.
 - Never print or return the value of `MOCO_API_KEY`.
 
 ## Command Rules
@@ -181,6 +206,9 @@ General rules:
 - `ROMSD-*` tickets are usually bug investigation or support. Use raw detection time only when the surrounding app/window context does not show a larger development session.
 - If one ticket branch dominates a development session, assign the IDE, terminal, and git time for that session to that ticket.
 - Codex task spans can overlap or continue in the background. Never sum them as billable time; use their titles/outcomes to identify the work and ActivityWatch `not-afk` plus git evidence to estimate duration.
+- Substantive PR review, review comments, CI verification, and merge checks are
+  work even when no code was authored. Include an evidenced review-only session
+  as a `Review` row; GitHub events are anchors, not automatic durations.
 - The analyzer excludes Codex subagents and automations. Do not reintroduce their durations manually unless independent foreground or git evidence requires it.
 - If activity is ambiguous during an otherwise clear coding session, treat technical browsing as work-related.
 
@@ -196,14 +224,14 @@ General rules:
    does not overlap unrelated user work. Split its internal turns using the same
    60-minute unsupported-gap rule; never count background waiting or overlapping
    tasks twice.
-4. Before accepting ActivityWatch `not-afk` as the daily total, calculate the
-   non-overlapping union of merged `not-afk` intervals and qualifying Codex
-   root-task turns. Count a Codex turn only when its ticket context is coherent
-   and foreground, git, PR/review, build, or outcome evidence supports real work;
-   exclude background waits, subagents, automations, and overlapping unrelated
-   tasks. When this evidence union materially exceeds ActivityWatch interaction,
-   use it as the estimate baseline and report both values with the reason for the
-   difference.
+4. Before accepting ActivityWatch `not-afk` as the daily total, inspect the
+   analyzer's non-overlapping evidence-union candidate of merged `not-afk`
+   intervals and qualifying Codex root-task turns. Accept each Codex extension
+   only when its ticket context is coherent and foreground, git, PR/review,
+   build, or concrete outcome evidence supports real work; exclude background
+   waits, subagents, automations, and overlapping unrelated tasks. When the
+   validated union materially exceeds ActivityWatch interaction, use it as the
+   estimate baseline and report both values with the reason for the difference.
 5. Commits, pushes, and review comments are anchors, not durations. Dense anchors
    may confirm continuity inside a candidate session, but a late squash or
    force-push does not make the preceding unsupported gap worked time.

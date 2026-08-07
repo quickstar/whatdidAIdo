@@ -32,7 +32,7 @@ Just ask in natural language:
 - **Complete GitHub audit** — Combines commit search, events, PRs, push comparisons, and local repositories
 - **Rewrite awareness** — Inspects rebases/squashes without double-counting the replacement commit
 - **Codex task context** — Reads local root-task history while excluding delegated subagents
-- **Idempotent MOCO sync** — Preserves existing entries by default and verifies Jira links after writes
+- **Idempotent MOCO sync** — Preserves existing entries by default, keeps durable local identity for untagged work, verifies totals, and checks Jira links after writes
 - **Break detection** — Identifies gaps in activity (lunch, coffee, etc.)
 - **Smart context** — Distinguishes work YouTube (tutorials) from personal YouTube based on surrounding activity
 
@@ -84,20 +84,24 @@ python worklog.py today --no-codex # ActivityWatch only
 python github_audit.py today --ai     # GitHub, PR, push/rewrite, and local git evidence
 ```
 
-To synchronize an approved JSON worklog, copy `worklog.example.json`, fill in
-the Jira-derived customer and billability values, dry-run it, and then apply:
+To synchronize an approved JSON worklog, copy `worklog.example.json` to
+`approved-worklog-YYYY-MM-DD.json`, fill in the evidence-derived customer and
+billability values, set `approved_total_hours`, dry-run it, and then apply:
 
 ```bash
-python moco_sync.py approved-worklog.json
-python moco_sync.py approved-worklog.json --apply
+python moco_sync.py approved-worklog-2026-07-28.json
+python moco_sync.py approved-worklog-2026-07-28.json --apply
+python moco_sync.py approved-worklog-2026-07-28.json --refresh-state # local ledger only
 ```
 
 Existing entries are preserved unless `--update-existing --apply` is explicitly
 used. `MOCO_API_KEY` is read from the process or Windows User/Machine environment
 and is never printed. Non-ticket meetings or administrative entries are also
-supported when they provide a stable `sync_key` for duplicate detection. The
-sync key is not written as a visible MOCO tag; only Jira-backed activities are
-tagged.
+supported when they provide a stable `sync_key` for duplicate detection. MOCO
+IDs for those entries are retained in the ignored local `.moco-sync-state.json`
+ledger. The sync key is not written as a visible MOCO tag; only Jira-backed
+activities are tagged. Dry-run and apply output include approved, desired, and
+effective stored totals so protected existing differences remain visible.
 
 ### Date formats
 
@@ -157,7 +161,7 @@ merely remaining open is never enough to count the intervening gap.
 
 When local Codex state is available, the analyzer reads `state_5.sqlite` and the referenced rollout JSONL files. It includes user-owned root tasks, including older tasks reopened on the requested date, and excludes subagents and automations to avoid obvious double counting.
 
-Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with ActivityWatch `not-afk` intervals. The agent splits unsupported gaps, unions accepted intervals to prevent double counting, rounds only after attribution, and labels medium/low-confidence estimates. Contractual billability comes from Jira/MOCO rules—never a percentage of ActivityWatch time. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
+Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with merged ActivityWatch `not-afk` intervals. The analyzer also prints a conservative ActivityWatch + qualifying-Codex evidence-union candidate; the agent validates its extensions against git, review, build, foreground, and outcome evidence before using it. The agent splits unsupported gaps, unions accepted intervals to prevent double counting, rounds only after attribution, and labels medium/low-confidence estimates. Contractual billability comes from Jira/MOCO rules—never a percentage of ActivityWatch time. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
 
 ## Database Location
 

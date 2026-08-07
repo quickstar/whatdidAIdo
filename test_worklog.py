@@ -164,6 +164,64 @@ class CodexHistoryTests(unittest.TestCase):
         self.assertIn('30m span / 10m not-AFK overlap', rendered)
         self.assertIn('branch feature/ITEM-123', rendered)
 
+    def test_activitywatch_not_afk_rows_are_merged_before_summing(self):
+        target_date = datetime(2026, 1, 15)
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'activitywatch.db'
+            connection = sqlite3.connect(database)
+            connection.execute('CREATE TABLE buckets (id INTEGER, name TEXT, type TEXT)')
+            connection.execute('CREATE TABLE events (bucketrow INTEGER, starttime INTEGER, endtime INTEGER, data TEXT)')
+            connection.execute(
+                'INSERT INTO buckets VALUES (?, ?, ?)',
+                (1, 'aw-watcher-afk_andromeda', 'afkstatus'),
+            )
+            first = epoch(2026, 1, 15, 9)
+            rows = [
+                (1, int(first * 1e9), int((first + 3600) * 1e9), json.dumps({'status': 'not-afk'})),
+                (1, int((first + 1800) * 1e9), int((first + 5400) * 1e9), json.dumps({'status': 'not-afk'})),
+            ]
+            connection.executemany('INSERT INTO events VALUES (?, ?, ?, ?)', rows)
+            connection.commit()
+            connection.close()
+
+            result = worklog.analyze_day(database, target_date)
+
+        self.assertEqual(7200, result['raw_total_active'])
+        self.assertEqual(5400, result['total_active'])
+        self.assertEqual(1, len(result['active_intervals']))
+
+    def test_evidence_union_adds_only_concrete_completed_codex_tasks(self):
+        active_start = datetime(2026, 1, 15, 9)
+        first = active_start.timestamp()
+        results = {
+            'active_intervals': [(active_start, 3600)],
+            'codex_tasks': [
+                {
+                    'thread_id': 'qualified',
+                    'status': 'completed',
+                    'tickets': ['ITEM-123'],
+                    'branch': 'feature/ITEM-123',
+                    'cwd': r'D:\git\rooms',
+                    'outcome': 'Implemented and verified the fix.',
+                    'spans': [(first + 1800, first + 7200)],
+                },
+                {
+                    'thread_id': 'background-wait',
+                    'status': 'active',
+                    'tickets': ['ITEM-999'],
+                    'branch': 'feature/ITEM-999',
+                    'cwd': r'D:\git\rooms',
+                    'outcome': '',
+                    'spans': [(first + 7200, first + 10800)],
+                },
+            ],
+        }
+
+        evidence = worklog.calculate_evidence_union(results)
+
+        self.assertEqual(7200, evidence['evidence_union_seconds'])
+        self.assertEqual(['qualified'], evidence['evidence_union_codex_task_ids'])
+
 
 if __name__ == '__main__':
     unittest.main()

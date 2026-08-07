@@ -1,5 +1,6 @@
 {
   "date": "2026-07-28",
+  "approved_total_hours": 3.5,
   "activities": [
     {
       "ticket": "BUG-456",
@@ -13,7 +14,8 @@
       "customer": "Acme",
       "description": "Backlog refinement",
       "hours": 1.0,
-      "billable": true
+      "billable": true,
+      "billability_evidence": "Customer-contracted refinement meeting"
     }
   ]
 }

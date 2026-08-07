@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import moco_sync
 
@@ -7,7 +9,11 @@ CONFIG = {
     'moco': {
         'base_url': 'https://example.mocoapp.com',
         'jira_base_url': 'https://example.atlassian.net/browse',
-        'customer_aliases': {'Fernfachhochschule Schweiz FFHS': 'FFHS'},
+        'customer_aliases': {
+            'Fernfachhochschule Schweiz FFHS': 'FFHS',
+            'UniversitätsSpital Zürich (USZ)': 'USZ',
+            'usz.ch': 'USZ',
+        },
         'customer_projects': {
             '2026': {
                 'FFHS': {
@@ -25,6 +31,7 @@ CONFIG = {
 def worklog(description='Fix payment behavior', hours=4.5):
     return {
         'date': '2026-07-28',
+        'approved_total_hours': hours,
         'activities': [{
             'ticket': 'ROMSD-1',
             'customer': 'Fernfachhochschule Schweiz FFHS',
@@ -109,6 +116,12 @@ class MocoSyncTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'at least 900 seconds'):
             moco_sync.synchronize(FakeClient(), worklog(hours=0.1), CONFIG)
 
+    def test_approved_total_must_match_activity_sum(self):
+        approved = worklog(hours=1)
+        approved['approved_total_hours'] = 1.25
+        with self.assertRaisesRegex(ValueError, 'activities sum'):
+            moco_sync.synchronize(FakeClient(), approved, CONFIG)
+
     def test_non_ticket_activity_uses_stable_sync_key_without_remote_link(self):
         client = FakeClient()
         meeting = {
@@ -126,6 +139,28 @@ class MocoSyncTests(unittest.TestCase):
         self.assertEqual('created', first['results'][0]['action'])
         self.assertEqual('unchanged', second['results'][0]['action'])
         self.assertNotIn('remote_service', client.records[0])
+        self.assertEqual('', client.records[0]['tag'])
+
+    def test_non_ticket_ledger_survives_description_change_without_visible_tag(self):
+        identity_state = {'version': 1, 'activities': {}}
+        meeting = {
+            'date': '2026-07-28',
+            'approved_total_hours': 1,
+            'activities': [{
+                'sync_key': 'acme-refinement',
+                'customer': 'FFHS',
+                'description': 'Refinement',
+                'hours': 1,
+                'billable': True,
+                'billability_evidence': 'Contracted customer meeting',
+            }],
+        }
+        client = FakeClient()
+        moco_sync.synchronize(client, meeting, CONFIG, apply=True, identity_state=identity_state)
+        meeting['activities'][0]['description'] = 'Backlog refinement'
+        result = moco_sync.synchronize(client, meeting, CONFIG, identity_state=identity_state)
+        self.assertEqual('preserved-existing', result['results'][0]['action'])
+        self.assertEqual('Refinement', client.records[0]['description'])
         self.assertEqual('', client.records[0]['tag'])
 
     def test_legacy_non_ticket_sync_key_tag_is_removed_on_explicit_update(self):
@@ -199,6 +234,58 @@ class MocoSyncTests(unittest.TestCase):
         result = moco_sync.synchronize(FakeClient([moved]), meeting, CONFIG)
         self.assertEqual('preserved-existing', result['results'][0]['action'])
         self.assertEqual({'current': 999, 'desired': 100}, result['results'][0]['differences']['project_id'])
+
+    def test_summary_exposes_desired_and_effective_preserved_totals(self):
+        existing = {
+            'id': '42',
+            'date': '2026-07-28',
+            'project': {'id': '100'},
+            'task': {'id': '200'},
+            'seconds': 7200,
+            'description': 'Manual description',
+            'billable': False,
+            'tag': 'ROMSD-1',
+            'remote_id': 'ROMSD-1',
+            'remote_url': 'https://example.atlassian.net/browse/ROMSD-1',
+        }
+        result = moco_sync.synchronize(FakeClient([existing]), worklog(hours=1), CONFIG)
+        self.assertEqual(3600, result['summary']['desired_seconds'])
+        self.assertEqual(7200, result['summary']['currently_stored_targeted_seconds'])
+        self.assertEqual(3600, result['summary']['currently_stored_difference_seconds'])
+        self.assertEqual(7200, result['summary']['projected_targeted_seconds'])
+
+    def test_dry_run_distinguishes_missing_current_time_from_projected_creation(self):
+        result = moco_sync.synchronize(FakeClient(), worklog(hours=1), CONFIG)
+        self.assertEqual(0, result['summary']['currently_stored_targeted_seconds'])
+        self.assertEqual(3600, result['summary']['projected_targeted_seconds'])
+
+    def test_customer_specific_non_jira_work_warns_without_billability_evidence(self):
+        meeting = {
+            'date': '2026-07-28',
+            'approved_total_hours': 1,
+            'activities': [{
+                'sync_key': 'acme-refinement',
+                'customer': 'FFHS',
+                'description': 'Customer refinement',
+                'hours': 1,
+                'billable': True,
+            }],
+        }
+        result = moco_sync.synchronize(FakeClient(), meeting, CONFIG)
+        self.assertTrue(any('billability_evidence' in warning for warning in result['warnings']))
+
+    def test_description_warns_when_it_mentions_another_customer(self):
+        mixed = worklog(description='Investigated FFHS behavior and USZ follow-up', hours=1)
+        result = moco_sync.synchronize(FakeClient(), mixed, CONFIG)
+        self.assertTrue(any('may mix assigned customer with USZ' in warning for warning in result['warnings']))
+
+    def test_identity_state_round_trips(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'state.json'
+            state = {'version': 1, 'activities': {'2026-07-28|refinement': '42'}}
+            moco_sync.save_identity_state(path, state)
+            loaded = moco_sync.load_identity_state(path)
+        self.assertEqual(state, loaded)
 
 
 if __name__ == '__main__':
