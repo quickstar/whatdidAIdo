@@ -1,0 +1,19 @@
+{
+  "date": "2026-07-30",
+  "activities": [
+    {
+      "ticket": "ITEM-3712",
+      "customer": "FFHS CR-1 Product Features",
+      "description": "Implemented and documented generic FlexRule calendar markers for Jobmanager-created bookings, including validation, migration, review fixes, and FFHS configuration",
+      "hours": 4.75,
+      "billable": true
+    },
+    {
+      "ticket": "ROMSD-6644",
+      "customer": "Baloise",
+      "description": "Rebased the related-booking history fix onto develop, resolved the test conflict, reviewed the pull request, and prepared documentation",
+      "hours": 0.75,
+      "billable": false
+    }
+  ]
+}

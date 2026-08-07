@@ -196,20 +196,28 @@ General rules:
    does not overlap unrelated user work. Split its internal turns using the same
    60-minute unsupported-gap rule; never count background waiting or overlapping
    tasks twice.
-4. Commits, pushes, and review comments are anchors, not durations. Dense anchors
+4. Before accepting ActivityWatch `not-afk` as the daily total, calculate the
+   non-overlapping union of merged `not-afk` intervals and qualifying Codex
+   root-task turns. Count a Codex turn only when its ticket context is coherent
+   and foreground, git, PR/review, build, or outcome evidence supports real work;
+   exclude background waits, subagents, automations, and overlapping unrelated
+   tasks. When this evidence union materially exceeds ActivityWatch interaction,
+   use it as the estimate baseline and report both values with the reason for the
+   difference.
+5. Commits, pushes, and review comments are anchors, not durations. Dense anchors
    may confirm continuity inside a candidate session, but a late squash or
    force-push does not make the preceding unsupported gap worked time.
-5. Group rebased, amended, superseded, and squash commits into one logical
+6. Group rebased, amended, superseded, and squash commits into one logical
    outcome. Analyze every distinct SHA, but never allocate time again for the
    replacement commit.
-6. Take the union of accepted intervals across tickets so the daily estimate
+7. Take the union of accepted intervals across tickets so the daily estimate
    cannot double-count concurrent activity. Round final ticket estimates to the
    nearest 0.25h only after union and attribution.
-7. Label confidence as `high` when foreground/Codex and git evidence agree,
+8. Label confidence as `high` when foreground/Codex and git evidence agree,
    `medium` when a coherent task and dense repository evidence fill ActivityWatch
    gaps, and `low` when only sparse anchors exist. Use `~` for medium/low time and
    explain low-confidence entries after the table.
-8. Determine contractual billability from Jira and MOCO rules only. There is no
+9. Determine contractual billability from Jira and MOCO rules only. There is no
    percentage-based billable-time heuristic.
 
 Example:
