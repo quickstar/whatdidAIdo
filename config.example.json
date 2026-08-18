@@ -1,5 +1,16 @@
 {
-  "database": "C:\\path\\to\\your\\activitywatch\\aw-server\\peewee-sqlite.v2.db",
+  "activitywatch": {
+    "host": "127.0.0.1",
+    "port": 5600,
+    "timezone": "Europe/Zurich",
+    "timeout_seconds": 30,
+    "source_aliases": {
+      "Mac": "macbook-pro",
+      "Macbook": "macbook-pro",
+      "4eff4d2f-2b91-4f60-a9da-b6556bb5145c": "macbook-pro"
+    },
+    "expected_sources": ["andromeda", "macbook-pro"]
+  },
   "codex_home": "C:\\Users\\you\\.codex",
 
   "github": {

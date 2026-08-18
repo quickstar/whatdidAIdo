@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ActivityWatch Worklog Analyzer
-Queries ActivityWatch SQLite database directly for faster, real-time analysis.
+Queries the local ActivityWatch REST API and aggregates every synced device.
 
 Usage:
   python worklog.py                    Interactive mode
@@ -16,9 +16,12 @@ import re
 import argparse
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
-from urllib.parse import quote, urlparse
+from datetime import datetime, timedelta, timezone as datetime_timezone, tzinfo
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import Request, urlopen
 from pathlib import Path, PureWindowsPath
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Configure UTF-8 output for Windows
 if sys.platform == 'win32':
@@ -30,18 +33,129 @@ CONFIG = {}
 CODEX_APP_NAMES = ['ChatGPT.exe', 'Codex.exe']
 
 
-def get_db_path():
-    """Get database path from config or environment."""
-    # 1. Check environment variable
-    if os.environ.get('AW_DATABASE'):
-        return os.environ['AW_DATABASE']
+class ActivityWatchAPIError(RuntimeError):
+    """Raised when the local ActivityWatch read API cannot be used safely."""
 
-    # 2. Check config.json
-    if CONFIG.get('database'):
-        return CONFIG['database']
 
-    # 3. Fallback default
-    return r"C:\Users\Lukas\AppData\Local\activitywatch\aw-server-rust\sqlite.db"
+class EuropeZurichTimezone(tzinfo):
+    """Dependency-free Europe/Zurich fallback for Windows without IANA tzdata."""
+
+    standard_offset = timedelta(hours=1)
+
+    @staticmethod
+    def _last_sunday(year, month):
+        if month == 12:
+            next_month = datetime(year + 1, 1, 1)
+        else:
+            next_month = datetime(year, month + 1, 1)
+        last_day = next_month - timedelta(days=1)
+        return last_day - timedelta(days=(last_day.weekday() + 1) % 7)
+
+    def dst(self, value):
+        if value is None:
+            return timedelta(0)
+        naive = value.replace(tzinfo=None)
+        start = self._last_sunday(naive.year, 3).replace(hour=2)
+        end = self._last_sunday(naive.year, 10).replace(hour=3)
+        return timedelta(hours=1) if start <= naive < end else timedelta(0)
+
+    def utcoffset(self, value):
+        return self.standard_offset + self.dst(value)
+
+    def tzname(self, value):
+        return 'CEST' if self.dst(value) else 'CET'
+
+    def __str__(self):
+        return 'Europe/Zurich'
+
+
+def resolve_timezone(timezone_name):
+    """Resolve an IANA timezone, with a dependency-free Zurich fallback."""
+    try:
+        return ZoneInfo(str(timezone_name))
+    except ZoneInfoNotFoundError as exc:
+        if str(timezone_name) == 'Europe/Zurich':
+            return EuropeZurichTimezone()
+        raise ActivityWatchAPIError(
+            f"Unknown ActivityWatch timezone {timezone_name!r}; install system tzdata "
+            "or use Europe/Zurich"
+        ) from exc
+
+
+class ActivityWatchRESTClient:
+    """Small read-only adapter for the aw-server-rust REST API."""
+
+    def __init__(self, host='127.0.0.1', port=5600, timeout=30):
+        self.host = str(host)
+        self.port = int(port)
+        self.timeout = float(timeout)
+        self.base_url = f"http://{self.host}:{self.port}/api/0"
+
+    def _get_json(self, path, params=None):
+        query = f"?{urlencode(params)}" if params else ''
+        request = Request(
+            f"{self.base_url}/{path.lstrip('/')}{query}",
+            headers={'Accept': 'application/json'},
+            method='GET',
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except HTTPError as exc:
+            raise ActivityWatchAPIError(
+                f"ActivityWatch API returned HTTP {exc.code} for {request.full_url}"
+            ) from exc
+        except (URLError, TimeoutError) as exc:
+            raise ActivityWatchAPIError(
+                f"Cannot reach ActivityWatch at http://{self.host}:{self.port}; "
+                "start aw-server-rust and verify the configured host and port"
+            ) from exc
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ActivityWatchAPIError(
+                f"ActivityWatch returned invalid JSON for {request.full_url}"
+            ) from exc
+
+    def get_info(self):
+        value = self._get_json('info')
+        if not isinstance(value, dict):
+            raise ActivityWatchAPIError('ActivityWatch /info response was not an object')
+        return value
+
+    def get_buckets(self):
+        value = self._get_json('buckets/')
+        if not isinstance(value, dict):
+            raise ActivityWatchAPIError('ActivityWatch bucket response was not an object')
+        buckets = []
+        for bucket_id, metadata in value.items():
+            if not isinstance(metadata, dict):
+                continue
+            buckets.append({'id': bucket_id, **metadata})
+        return buckets
+
+    def get_events(self, bucket_id, start, end):
+        value = self._get_json(
+            f"buckets/{quote(str(bucket_id), safe='')}/events",
+            {'start': start.isoformat(), 'end': end.isoformat(), 'limit': -1},
+        )
+        if not isinstance(value, list):
+            raise ActivityWatchAPIError(
+                f"ActivityWatch events response for {bucket_id} was not a list"
+            )
+        return value
+
+
+def get_activitywatch_settings(explicit_host=None, explicit_port=None):
+    """Resolve ActivityWatch connection settings from CLI, env, config, defaults."""
+    settings = CONFIG.get('activitywatch', {})
+    host = explicit_host or os.environ.get('AW_HOST') or settings.get('host') or '127.0.0.1'
+    port = explicit_port or os.environ.get('AW_PORT') or settings.get('port') or 5600
+    timezone_name = settings.get('timezone') or CONFIG.get('github', {}).get('timezone') or 'Europe/Zurich'
+    timeout = settings.get('timeout_seconds', 30)
+    timezone = resolve_timezone(timezone_name)
+    try:
+        return str(host), int(port), timezone, float(timeout)
+    except (TypeError, ValueError) as exc:
+        raise ActivityWatchAPIError('ActivityWatch port and timeout must be numeric') from exc
 
 
 def get_codex_home(explicit_path=None):
@@ -114,10 +228,19 @@ def parse_date(date_str):
     return None
 
 
-def day_epoch_bounds(target_date):
-    """Return local-day boundaries as Unix timestamps."""
-    start = datetime(target_date.year, target_date.month, target_date.day)
-    end = start + timedelta(days=1)
+def day_datetime_bounds(target_date, timezone=None):
+    """Return timezone-aware local-day boundaries, including DST transitions."""
+    if timezone is None:
+        _, _, timezone, _ = get_activitywatch_settings()
+    start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone)
+    next_day = target_date.date() + timedelta(days=1)
+    end = datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone)
+    return start, end
+
+
+def day_epoch_bounds(target_date, timezone=None):
+    """Return configured-local-day boundaries as Unix timestamps."""
+    start, end = day_datetime_bounds(target_date, timezone)
     return start.timestamp(), end.timestamp()
 
 
@@ -273,37 +396,138 @@ def codex_workspace_name(cwd):
     return Path(normalized).name or normalized or '-'
 
 
-def get_buckets(cursor):
-    """Get all bucket IDs and names."""
-    cursor.execute('SELECT id, name, type FROM buckets')
-    return {row[1]: {'id': row[0], 'type': row[2]} for row in cursor.fetchall()}
+SUPPORTED_BUCKET_TYPES = {
+    'afkstatus': 'afk',
+    'currentwindow': 'window',
+    'web.tab.current': 'web',
+    'app.editor.activity': 'editor',
+}
 
 
-def query_events(cursor, bucket_id, start_ns, end_ns):
-    """Query events for a bucket within time range."""
-    cursor.execute('''
-        SELECT starttime, endtime, data
-        FROM events
-        WHERE bucketrow = ? AND starttime >= ? AND starttime < ?
-        ORDER BY starttime
-    ''', (bucket_id, start_ns, end_ns))
-    return cursor.fetchall()
+def logical_bucket_id(bucket_id):
+    """Strip aw-sync provenance suffixes while retaining watcher identity."""
+    return str(bucket_id).split('-synced-from-', 1)[0]
 
 
-def analyze_day(db_path, target_date):
-    """Analyze all activity for a given date."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+def raw_activitywatch_source(bucket):
+    """Resolve the source label exposed by ActivityWatch sync metadata."""
+    data = bucket.get('data') if isinstance(bucket.get('data'), dict) else {}
+    origin = data.get('$aw.sync.origin')
+    if origin:
+        return str(origin)
+    hostname = bucket.get('hostname')
+    if hostname and str(hostname).lower() != 'unknown':
+        return str(hostname)
+    match = re.search(r'-synced-from-(.+)$', str(bucket.get('id', '')))
+    return match.group(1) if match else str(hostname or 'unknown')
 
-    # Calculate time range (nanoseconds)
-    start_dt = datetime(target_date.year, target_date.month, target_date.day)
-    end_dt = start_dt + timedelta(days=1)
-    start_ns = int(start_dt.timestamp() * 1_000_000_000)
-    end_ns = int(end_dt.timestamp() * 1_000_000_000)
 
-    buckets = get_buckets(cursor)
+def get_activitywatch_source_aliases():
+    """Return validated case-insensitive ActivityWatch source aliases."""
+    settings = CONFIG.get('activitywatch', {})
+    raw_aliases = settings.get('source_aliases', {}) if isinstance(settings, dict) else {}
+    if raw_aliases is None:
+        return {}
+    if not isinstance(raw_aliases, dict):
+        raise ActivityWatchAPIError(
+            'activitywatch.source_aliases must be an object mapping aliases to canonical sources'
+        )
 
-    results = {
+    aliases = {}
+    for raw_source, raw_canonical in raw_aliases.items():
+        if not isinstance(raw_source, str) or not isinstance(raw_canonical, str):
+            raise ActivityWatchAPIError(
+                'ActivityWatch source aliases and canonical sources must be strings'
+            )
+        source = raw_source.strip()
+        canonical = raw_canonical.strip()
+        if not source or not canonical:
+            raise ActivityWatchAPIError(
+                'ActivityWatch source aliases and canonical sources must not be empty'
+            )
+        key = source.casefold()
+        existing = aliases.get(key)
+        if existing is not None and existing.casefold() != canonical.casefold():
+            raise ActivityWatchAPIError(
+                f'Conflicting ActivityWatch source aliases for {source!r}'
+            )
+        aliases[key] = canonical
+
+    resolved = {}
+    for alias, target in aliases.items():
+        visited = {alias}
+        while target.casefold() in aliases:
+            next_alias = target.casefold()
+            if next_alias in visited:
+                raise ActivityWatchAPIError(
+                    f'Cyclic ActivityWatch source alias involving {target!r}'
+                )
+            visited.add(next_alias)
+            target = aliases[next_alias]
+        resolved[alias] = target
+    return resolved
+
+
+def normalize_activitywatch_source(source, aliases=None):
+    """Map a raw source label to its configured canonical device identity."""
+    label = str(source or 'unknown')
+    aliases = get_activitywatch_source_aliases() if aliases is None else aliases
+    return aliases.get(label.casefold(), label)
+
+
+def get_activitywatch_expected_sources(aliases=None):
+    """Return the validated canonical source inventory, if configured."""
+    settings = CONFIG.get('activitywatch', {})
+    raw_sources = settings.get('expected_sources', []) if isinstance(settings, dict) else []
+    if raw_sources is None:
+        return []
+    if not isinstance(raw_sources, list) or any(
+        not isinstance(source, str) or not source.strip() for source in raw_sources
+    ):
+        raise ActivityWatchAPIError(
+            'activitywatch.expected_sources must be a list of non-empty strings'
+        )
+    aliases = get_activitywatch_source_aliases() if aliases is None else aliases
+    return sorted({
+        normalize_activitywatch_source(source.strip(), aliases) for source in raw_sources
+    })
+
+
+def activitywatch_source(bucket, aliases=None):
+    """Resolve and canonicalize a source label from ActivityWatch metadata."""
+    return normalize_activitywatch_source(raw_activitywatch_source(bucket), aliases)
+
+
+def parse_activitywatch_event(event, day_start, day_end):
+    """Validate and clip one API event to the requested local day."""
+    if not isinstance(event, dict) or not isinstance(event.get('data'), dict):
+        return None
+    try:
+        timestamp = datetime.fromisoformat(str(event['timestamp']).replace('Z', '+00:00'))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=datetime_timezone.utc)
+        duration = float(event.get('duration', 0))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    event_start = timestamp.timestamp()
+    event_end = event_start + duration
+    clipped_start = max(event_start, day_start.timestamp())
+    clipped_end = min(event_end, day_end.timestamp())
+    if clipped_end <= clipped_start:
+        return None
+    return clipped_start, clipped_end, event['data']
+
+
+def activitywatch_event_fingerprint(source, kind, start, end, data):
+    """Build a deterministic identity for exact copies imported more than once."""
+    canonical_data = json.dumps(data, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return source, kind, round(start, 6), round(end - start, 6), canonical_data
+
+
+def empty_activitywatch_results():
+    return {
         'app_time': defaultdict(float),
         'window_details': defaultdict(lambda: defaultdict(float)),
         'jira_tickets': defaultdict(float),
@@ -316,132 +540,273 @@ def analyze_day(db_path, target_date):
         'active_intervals': [],
         'total_active': 0,
         'codex_tasks': [],
+        'activitywatch_sources': [],
+        'activitywatch_source_aliases': {},
+        'activitywatch_source_active': {},
+        'activitywatch_bucket_counts': {},
+        'activitywatch_source_app_time': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_source_window_details': defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        ),
+        'activitywatch_source_tickets': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_source_domain_time': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_source_file_time': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_source_branches': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_source_teams': defaultdict(lambda: defaultdict(float)),
+        'activitywatch_cross_source_overlap': 0,
+        'activitywatch_duplicate_events': 0,
+        'activitywatch_malformed_events': 0,
+        'activitywatch_warnings': [],
     }
 
-    # Window activity
-    window_bucket = buckets.get('aw-watcher-window_andromeda')
-    if window_bucket:
-        events = query_events(cursor, window_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
-            data = json.loads(data_json)
-            app = data.get('app', 'Unknown')
-            title = data.get('title', '')
 
-            results['app_time'][app] += duration
-            if title:
-                results['window_details'][app][clean(title[:100])] += duration
+def analyze_day(client, target_date, timezone=None):
+    """Analyze one local day across every relevant API-visible device bucket."""
+    if timezone is None:
+        _, _, timezone, _ = get_activitywatch_settings()
+    day_start, day_end = day_datetime_bounds(target_date, timezone)
+    server_info = client.get_info()
+    buckets = client.get_buckets()
+    relevant_buckets = [bucket for bucket in buckets if bucket.get('type') in SUPPORTED_BUCKET_TYPES]
+    source_aliases = get_activitywatch_source_aliases()
+    expected_sources = get_activitywatch_expected_sources(source_aliases)
+    used_source_aliases = {}
 
-            # Git branches
-            if 'GitExtensions' in app:
-                m = re.search(r'rooms \(([^)]+)\)', title)
-                if m:
-                    results['branches'][m.group(1)] += duration
-                m = re.search(r'Commit to ([^ ]+)', title)
-                if m:
-                    results['branches'][m.group(1)] += duration
+    results = empty_activitywatch_results()
+    results['activitywatch_server'] = server_info
+    results['activitywatch_timezone'] = str(timezone)
+    for bucket in relevant_buckets:
+        raw_source = raw_activitywatch_source(bucket)
+        canonical_source = normalize_activitywatch_source(raw_source, source_aliases)
+        if raw_source != canonical_source:
+            used_source_aliases[raw_source] = canonical_source
+    results['activitywatch_source_aliases'] = dict(
+        sorted(used_source_aliases.items(), key=lambda item: item[0].casefold())
+    )
+    results['activitywatch_sources'] = sorted({
+        activitywatch_source(bucket, source_aliases) for bucket in relevant_buckets
+    })
 
-            # Teams - keep full title for correlation matching (don't clean yet)
-            if 'ms-teams' in app.lower():
-                # Store original title for correlation matching
-                results['teams'][title[:100]] += duration
-
-    # Web activity (Edge)
-    web_bucket = buckets.get('aw-watcher-web-edge_andromeda')
-    if web_bucket:
-        events = query_events(cursor, web_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
-            data = json.loads(data_json)
-            url = data.get('url', '')
-            title = data.get('title', '')
-
-            if url:
-                domain = urlparse(url).netloc
-                results['domain_time'][domain] += duration
-
-            if title:
-                results['page_details'][clean(title[:80])] += duration
-
-            # JIRA tickets
-            matches = re.findall(r'ROMSD-\d+', title + url)
-            for m in matches:
-                results['jira_tickets'][m] += duration
-            matches = re.findall(r'ITEM-\d+', title + url)
-            for m in matches:
-                results['jira_tickets'][m] += duration
-
-    # Web activity (Firefox)
-    web_bucket = buckets.get('aw-watcher-web-firefox_andromeda')
-    if web_bucket:
-        events = query_events(cursor, web_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
-            data = json.loads(data_json)
-            url = data.get('url', '')
-            title = data.get('title', '')
-
-            if url:
-                domain = urlparse(url).netloc
-                results['domain_time'][domain] += duration
-
-            if title:
-                results['page_details'][clean(title[:80])] += duration
-
-            matches = re.findall(r'ROMSD-\d+', title + url)
-            for m in matches:
-                results['jira_tickets'][m] += duration
-            matches = re.findall(r'ITEM-\d+', title + url)
-            for m in matches:
-                results['jira_tickets'][m] += duration
-
-    # IDE files (Rider)
-    rider_bucket = buckets.get('aw-watcher-jetbrains-rider_andromeda')
-    if rider_bucket:
-        events = query_events(cursor, rider_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
-            data = json.loads(data_json)
-            file = data.get('file', '')
-            if file:
-                results['file_time'][file] += duration
-
-    # IDE files (VSCode)
-    vscode_bucket = buckets.get('aw-watcher-vscode_andromeda')
-    if vscode_bucket:
-        events = query_events(cursor, vscode_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            duration = (end - start) / 1_000_000_000
-            data = json.loads(data_json)
-            file = data.get('file', '')
-            if file:
-                results['file_time'][file] += duration
-
-    # AFK status. ActivityWatch history/heartbeat rows can overlap, so never
-    # sum them directly; merge them into a non-overlapping union first.
-    afk_bucket = buckets.get('aw-watcher-afk_andromeda')
+    bucket_counts = defaultdict(lambda: defaultdict(int))
+    bucket_types_by_source = defaultdict(set)
+    seen_events = set()
+    source_not_afk = defaultdict(list)
     raw_not_afk_intervals = []
-    if afk_bucket:
-        events = query_events(cursor, afk_bucket['id'], start_ns, end_ns)
-        for start, end, data_json in events:
-            data = json.loads(data_json)
-            status = data.get('status', '')
-            if status == 'not-afk':
-                raw_not_afk_intervals.append((start / 1_000_000_000, end / 1_000_000_000))
+
+    for bucket in relevant_buckets:
+        source = activitywatch_source(bucket, source_aliases)
+        kind = SUPPORTED_BUCKET_TYPES[bucket['type']]
+        bucket_counts[source][kind] += 1
+        bucket_types_by_source[source].add(kind)
+        for raw_event in client.get_events(bucket['id'], day_start, day_end):
+            if isinstance(raw_event, dict):
+                try:
+                    if float(raw_event.get('duration')) <= 0:
+                        # Watchers expose their current heartbeat as a valid zero-duration event.
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            parsed = parse_activitywatch_event(raw_event, day_start, day_end)
+            if parsed is None:
+                results['activitywatch_malformed_events'] += 1
+                continue
+            start, end, data = parsed
+            fingerprint = activitywatch_event_fingerprint(source, kind, start, end, data)
+            if fingerprint in seen_events:
+                results['activitywatch_duplicate_events'] += 1
+                continue
+            seen_events.add(fingerprint)
+            duration = end - start
+
+            if kind == 'window':
+                app = data.get('app', 'Unknown')
+                title = data.get('title', '')
+                results['app_time'][app] += duration
+                results['activitywatch_source_app_time'][source][app] += duration
+                if title:
+                    cleaned_title = clean(title[:100])
+                    results['window_details'][app][cleaned_title] += duration
+                    results['activitywatch_source_window_details'][source][app][cleaned_title] += duration
+                    for ticket in extract_tickets(title):
+                        results['activitywatch_source_tickets'][source][ticket] += duration
+                if 'GitExtensions' in app:
+                    branch_match = re.search(r'rooms \(([^)]+)\)', title)
+                    if branch_match:
+                        branch = branch_match.group(1)
+                        results['branches'][branch] += duration
+                        results['activitywatch_source_branches'][source][branch] += duration
+                    branch_match = re.search(r'Commit to ([^ ]+)', title)
+                    if branch_match:
+                        branch = branch_match.group(1)
+                        results['branches'][branch] += duration
+                        results['activitywatch_source_branches'][source][branch] += duration
+                if 'ms-teams' in app.lower():
+                    results['teams'][title[:100]] += duration
+                    results['activitywatch_source_teams'][source][title[:100]] += duration
+            elif kind == 'web':
+                url = data.get('url', '')
+                title = data.get('title', '')
+                if url:
+                    domain = urlparse(url).netloc
+                    results['domain_time'][domain] += duration
+                    results['activitywatch_source_domain_time'][source][domain] += duration
+                if title:
+                    results['page_details'][clean(title[:80])] += duration
+                for ticket in extract_tickets(title, url):
+                    results['jira_tickets'][ticket] += duration
+                    results['activitywatch_source_tickets'][source][ticket] += duration
+            elif kind == 'editor':
+                file = data.get('file', '')
+                if file:
+                    results['file_time'][file] += duration
+                    results['activitywatch_source_file_time'][source][file] += duration
+            elif kind == 'afk' and data.get('status') == 'not-afk':
+                interval = (start, end)
+                raw_not_afk_intervals.append(interval)
+                source_not_afk[source].append(interval)
 
     merged_not_afk = merge_intervals(raw_not_afk_intervals)
+    source_active = {
+        source: interval_total_seconds(intervals)
+        for source, intervals in source_not_afk.items()
+    }
+    results['activitywatch_source_active'] = source_active
+    results['activitywatch_bucket_counts'] = {
+        source: dict(sorted(counts.items())) for source, counts in sorted(bucket_counts.items())
+    }
     results['raw_total_active'] = sum(end - start for start, end in raw_not_afk_intervals)
     results['total_active'] = interval_total_seconds(merged_not_afk)
+    results['activitywatch_cross_source_overlap'] = max(
+        0, sum(source_active.values()) - results['total_active']
+    )
+
     for start, end in merged_not_afk:
         duration = end - start
-        ts = datetime.fromtimestamp(start)
-        results['active_intervals'].append((ts, duration))
+        timestamp = datetime.fromtimestamp(start, timezone)
+        results['active_intervals'].append((timestamp, duration))
         if duration >= 300:
-            results['active_periods'].append((ts, duration))
-
+            results['active_periods'].append((timestamp, duration))
     results['active_periods'].sort()
-    conn.close()
+
+    server_source = normalize_activitywatch_source(
+        str(server_info.get('hostname') or ''), source_aliases
+    )
+    if not relevant_buckets:
+        results['activitywatch_warnings'].append('No supported ActivityWatch buckets were discovered')
+    if results['activitywatch_sources'] and not any(
+        source != server_source for source in results['activitywatch_sources']
+    ):
+        results['activitywatch_warnings'].append(
+            'No remote ActivityWatch source is currently visible through the central API'
+        )
+    missing_expected_sources = sorted(set(expected_sources) - set(results['activitywatch_sources']))
+    if missing_expected_sources:
+        results['activitywatch_warnings'].append(
+            'Expected ActivityWatch sources are absent: ' + ', '.join(missing_expected_sources)
+        )
+    for source in results['activitywatch_sources']:
+        missing = {'afk', 'window'} - bucket_types_by_source[source]
+        if missing:
+            results['activitywatch_warnings'].append(
+                f"Source {source} is missing expected desktop bucket types: {', '.join(sorted(missing))}"
+            )
+    if results['activitywatch_duplicate_events']:
+        results['activitywatch_warnings'].append(
+            f"Ignored {results['activitywatch_duplicate_events']} exact replicated events"
+        )
+    if results['activitywatch_malformed_events']:
+        results['activitywatch_warnings'].append(
+            f"Ignored {results['activitywatch_malformed_events']} malformed events"
+        )
     return results
+
+
+def activitywatch_health(client):
+    """Return discovery-only server and bucket diagnostics without modifying data."""
+    info = client.get_info()
+    buckets = client.get_buckets()
+    relevant = [bucket for bucket in buckets if bucket.get('type') in SUPPORTED_BUCKET_TYPES]
+    source_aliases = get_activitywatch_source_aliases()
+    expected_sources = get_activitywatch_expected_sources(source_aliases)
+    sources = defaultdict(lambda: defaultdict(list))
+    duplicate_candidates = defaultdict(list)
+    used_source_aliases = {}
+
+    def latest_update(bucket):
+        metadata = bucket.get('metadata')
+        metadata_end = metadata.get('end') if isinstance(metadata, dict) else None
+        return str(bucket.get('last_updated') or metadata_end or '')
+
+    source_latest_updates = {}
+    for bucket in relevant:
+        raw_source = raw_activitywatch_source(bucket)
+        source = normalize_activitywatch_source(raw_source, source_aliases)
+        if raw_source != source:
+            used_source_aliases[raw_source] = source
+        kind = SUPPORTED_BUCKET_TYPES[bucket['type']]
+        sources[source][kind].append(bucket['id'])
+        duplicate_candidates[(source, logical_bucket_id(bucket['id']))].append(bucket['id'])
+        source_latest_updates[source] = max(
+            source_latest_updates.get(source, ''), latest_update(bucket)
+        )
+
+    coverage_warnings = []
+    for source, kinds in sorted(sources.items()):
+        missing = {'afk', 'window'} - set(kinds)
+        if missing:
+            coverage_warnings.append(
+                f"Source {source} is missing expected desktop bucket types: "
+                + ', '.join(sorted(missing))
+            )
+    missing_expected_sources = sorted(set(expected_sources) - set(sources))
+    if missing_expected_sources:
+        coverage_warnings.append(
+            'Expected ActivityWatch sources are absent: ' + ', '.join(missing_expected_sources)
+        )
+
+    return {
+        'info': info,
+        'sources': {source: dict(kinds) for source, kinds in sorted(sources.items())},
+        'source_aliases': dict(
+            sorted(used_source_aliases.items(), key=lambda item: item[0].casefold())
+        ),
+        'expected_sources': expected_sources,
+        'source_latest_updates': dict(sorted(source_latest_updates.items())),
+        'coverage_warnings': coverage_warnings,
+        'duplicate_bucket_candidates': [
+            ids for ids in duplicate_candidates.values() if len(ids) > 1
+        ],
+        'latest_bucket_update': max((latest_update(bucket) for bucket in relevant), default=''),
+    }
+
+
+def print_activitywatch_health(health):
+    """Print compact central-server discovery diagnostics."""
+    info = health['info']
+    print(f"ActivityWatch {info.get('version', 'unknown')} at {info.get('hostname', 'unknown')}")
+    print(f"Device ID: {info.get('device_id', 'unknown')}")
+    print(f"Latest bucket update: {health['latest_bucket_update'] or 'unknown'}")
+    if not health['sources']:
+        print('Sources: none')
+    for source, kinds in health['sources'].items():
+        summary = ', '.join(f"{kind}={len(ids)}" for kind, ids in sorted(kinds.items()))
+        latest = health['source_latest_updates'].get(source) or 'unknown'
+        print(f"Source {source}: {summary}, latest={latest}")
+    if health['source_aliases']:
+        alias_summary = ', '.join(
+            f"{raw} -> {canonical}"
+            for raw, canonical in health['source_aliases'].items()
+        )
+        print(f"Source aliases: {alias_summary}")
+    if health['duplicate_bucket_candidates']:
+        print(f"Warning: {len(health['duplicate_bucket_candidates'])} duplicate bucket candidate group(s)")
+    for warning in health['coverage_warnings']:
+        print(f"Warning: {warning}")
+    server_source = normalize_activitywatch_source(
+        str(info.get('hostname') or ''), get_activitywatch_source_aliases()
+    )
+    if health['sources'] and not any(source != server_source for source in health['sources']):
+        print('Warning: no remote source is visible; discovery-only mode cannot prove completeness')
 
 
 def find_codex_state_db(codex_home):
@@ -810,6 +1175,100 @@ def print_codex_tasks_ai(tasks):
             print(f"  Outcome: {task['outcome']}")
 
 
+def print_activitywatch_provenance(results, markdown=True):
+    """Render device discovery and overlap diagnostics."""
+    server = results.get('activitywatch_server', {})
+    sources = results.get('activitywatch_sources', [])
+    source_active = results.get('activitywatch_source_active', {})
+    bucket_counts = results.get('activitywatch_bucket_counts', {})
+    source_aliases = results.get('activitywatch_source_aliases', {})
+    source_text = ', '.join(
+        f"{source} ({format_duration(source_active.get(source, 0))} active)"
+        for source in sources
+    ) or 'none'
+    bucket_text = '; '.join(
+        f"{source}: " + ', '.join(
+            f"{kind}={count}" for kind, count in sorted(counts.items())
+        )
+        for source, counts in sorted(bucket_counts.items())
+    ) or 'none'
+    server_text = (
+        f"{server.get('hostname', 'unknown')} "
+        f"({server.get('version', 'unknown')})"
+    )
+    alias_text = ', '.join(
+        f"{raw} -> {canonical}" for raw, canonical in source_aliases.items()
+    )
+    overlap = results.get('activitywatch_cross_source_overlap', 0)
+    if markdown:
+        print(f"**ActivityWatch Server: {server_text}**")
+        print(f"**ActivityWatch Sources: {source_text}**")
+        if alias_text:
+            print(f"**ActivityWatch Source aliases: {alias_text}**")
+        print(f"**ActivityWatch Buckets: {bucket_text}**")
+        if overlap >= 1:
+            print(f"**Cross-source interaction overlap: {format_duration(overlap)}**")
+        for warning in results.get('activitywatch_warnings', []):
+            print(f"**ActivityWatch Warning: {warning}**")
+    else:
+        print(f"ActivityWatch Server: {server_text}")
+        print(f"ActivityWatch Sources: {source_text}")
+        if alias_text:
+            print(f"ActivityWatch Source aliases: {alias_text}")
+        print(f"ActivityWatch Buckets: {bucket_text}")
+        if overlap >= 1:
+            print(f"Cross-source interaction overlap: {format_duration(overlap)}")
+        for warning in results.get('activitywatch_warnings', []):
+            print(f"Warning: {warning}")
+
+
+def activitywatch_ticket_sources(results, ticket):
+    """Return canonical ActivityWatch sources containing evidence for a ticket."""
+    sources = set()
+    for source, tickets in results.get('activitywatch_source_tickets', {}).items():
+        if tickets.get(ticket, 0) > 0:
+            sources.add(source)
+    for source, branches in results.get('activitywatch_source_branches', {}).items():
+        if any(ticket.casefold() in branch.casefold() for branch in branches):
+            sources.add(source)
+    return sorted(sources, key=str.casefold)
+
+
+def format_evidence_sources(sources, fallback='device unknown (non-ActivityWatch evidence)'):
+    return ', '.join(sorted(set(sources), key=str.casefold)) or fallback
+
+
+def print_activitywatch_source_evidence(results):
+    """Render compact task-attribution evidence grouped by recording source."""
+    sources = results.get('activitywatch_sources', [])
+    if not sources:
+        return
+
+    print("\n**ActivityWatch Evidence by Source:**")
+    for source in sources:
+        parts = []
+        tickets = results.get('activitywatch_source_tickets', {}).get(source, {})
+        if tickets:
+            parts.append('tickets ' + ', '.join(sorted(tickets)))
+        apps = results.get('activitywatch_source_app_time', {}).get(source, {})
+        top_apps = [
+            f"{app} {format_duration(seconds)}"
+            for app, seconds in sorted(apps.items(), key=lambda item: -item[1])
+            if seconds >= 60
+        ][:6]
+        if top_apps:
+            parts.append('apps ' + ', '.join(top_apps))
+        domains = results.get('activitywatch_source_domain_time', {}).get(source, {})
+        top_domains = [
+            f"{domain} {format_duration(seconds)}"
+            for domain, seconds in sorted(domains.items(), key=lambda item: -item[1])
+            if domain and seconds >= 60
+        ][:4]
+        if top_domains:
+            parts.append('domains ' + ', '.join(top_domains))
+        print(f"- {source}: {' | '.join(parts) if parts else 'no task-specific foreground evidence'}")
+
+
 def print_ai_summary_v2(results, target_date):
     """Print categorized AI-friendly summary with correlations applied."""
     total_hours = results['total_active'] / 3600
@@ -819,6 +1278,8 @@ def print_ai_summary_v2(results, target_date):
 
     print(f"# Worklog Data for {date_str}")
     print(f"**Observed Interaction: {total_hours:.1f}h**")
+    print_activitywatch_provenance(results)
+    print_activitywatch_source_evidence(results)
     raw_total = results.get('raw_total_active', results['total_active'])
     overlap_removed = max(0, raw_total - results['total_active'])
     if overlap_removed >= 1:
@@ -855,8 +1316,8 @@ def print_ai_summary_v2(results, target_date):
         print(f"**Clients: {', '.join(f'{c} ({format_duration(d)})' for c, d in sorted(detected_clients.items(), key=lambda x: -x[1]))}**")
 
     print("\n## Categorized Summary")
-    print("\n| Category | Client/Ticket | Description | Time |")
-    print("|----------|---------------|-------------|------|")
+    print("\n| Category | Client/Ticket | Source | Description | Time |")
+    print("|----------|---------------|--------|-------------|------|")
 
     known_tickets = CONFIG.get('known_tickets', {})
 
@@ -895,7 +1356,8 @@ def print_ai_summary_v2(results, target_date):
         if dur >= 60 or ticket in codex_ticket_times:
             desc = known_tickets.get(ticket, '')
             raw_time = f"{format_duration(dur)} (raw, Codex context)" if dur >= 60 else "Codex history"
-            print(f"| Development | [{ticket}](https://3volutions.atlassian.net/browse/{ticket}) | {desc} | {raw_time} |")
+            source = format_evidence_sources(activitywatch_ticket_sources(results, ticket))
+            print(f"| Development | [{ticket}](https://3volutions.atlassian.net/browse/{ticket}) | {source} | {desc} | {raw_time} |")
 
     # ROMSD tickets (bugs/support)
     romsd_tickets = [(t, d) for t, d in all_tickets.items() if t.startswith('ROMSD')]
@@ -903,7 +1365,8 @@ def print_ai_summary_v2(results, target_date):
         if dur >= 60 or ticket in codex_ticket_times:
             desc = known_tickets.get(ticket, '')
             raw_time = f"{format_duration(dur)} (raw, Codex context)" if dur >= 60 else "Codex history"
-            print(f"| Bug Fix | [{ticket}](https://3volutions.atlassian.net/browse/{ticket}) | {desc} | {raw_time} |")
+            source = format_evidence_sources(activitywatch_ticket_sources(results, ticket))
+            print(f"| Bug Fix | [{ticket}](https://3volutions.atlassian.net/browse/{ticket}) | {source} | {desc} | {raw_time} |")
 
     # Meetings (grouped by client with correlations)
     for key, meeting in sorted(meetings.items(), key=lambda x: -x[1]['time']):
@@ -926,16 +1389,35 @@ def print_ai_summary_v2(results, target_date):
                 desc = detail.split('|')[0].strip()[:50]
             else:
                 desc = '-'
-            print(f"| Meeting | {client_str} | {desc} | {format_duration(meeting['time'])} |")
+            meeting_sources = [
+                source
+                for source, conversations in results.get('activitywatch_source_teams', {}).items()
+                if any(detail in conversations for detail in meeting['details'])
+            ]
+            print(f"| Meeting | {client_str} | {format_evidence_sources(meeting_sources)} | {desc} | {format_duration(meeting['time'])} |")
 
     # Infrastructure
     if categories.get('Infrastructure', {}).get('time', 0) >= 60:
-        print(f"| Infrastructure | - | DevOps, deployments, CI/CD | {format_duration(categories['Infrastructure']['time'])} |")
+        infra_sources = [
+            source
+            for source, domains in results.get('activitywatch_source_domain_time', {}).items()
+            if any(
+                marker in domain.lower()
+                for domain in domains
+                for marker in ['deploy.3vrooms.app', 'argocd', 'azure', 'github.com']
+            )
+        ]
+        print(f"| Infrastructure | - | {format_evidence_sources(infra_sources)} | DevOps, deployments, CI/CD | {format_duration(categories['Infrastructure']['time'])} |")
 
     # Administrative
     admin_time = results['app_time'].get('olk.exe', 0) + results['app_time'].get('OUTLOOK.EXE', 0)
     if admin_time >= 60:
-        print(f"| Administrative | - | Email, calendar | {format_duration(admin_time)} |")
+        admin_sources = [
+            source
+            for source, apps in results.get('activitywatch_source_app_time', {}).items()
+            if apps.get('olk.exe', 0) + apps.get('OUTLOOK.EXE', 0) >= 60
+        ]
+        print(f"| Administrative | - | {format_evidence_sources(admin_sources)} | Email, calendar | {format_duration(admin_time)} |")
 
     # Raw data section for AI interpretation
     print("\n## Raw Data (for time estimation)")
@@ -1117,6 +1599,7 @@ def print_summary(results, target_date):
     print(f"WORKLOG SUMMARY - {date_str}")
     print("=" * 80)
     print(f"\nObserved ActivityWatch Interaction: {total_hours:.1f} hours")
+    print_activitywatch_provenance(results, markdown=False)
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
@@ -1222,7 +1705,7 @@ def print_summary(results, target_date):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Analyze ActivityWatch SQLite database for worklog generation.',
+        description='Analyze API-visible ActivityWatch data for worklog generation.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1235,34 +1718,43 @@ Examples:
     )
     parser.add_argument('date', nargs='?', help='Date to analyze (e.g., 27.01.2026, today, yesterday)')
     parser.add_argument('--ai', action='store_true', help='Output compact format for AI interpretation')
-    parser.add_argument('--db', help='Path to SQLite database (default: from config.json or AW_DATABASE env)')
+    parser.add_argument('--aw-host', help='ActivityWatch API host (default: AW_HOST/config/127.0.0.1)')
+    parser.add_argument('--aw-port', type=int, help='ActivityWatch API port (default: AW_PORT/config/5600)')
+    parser.add_argument(
+        '--activitywatch-health', action='store_true',
+        help='Show read-only server, source, and bucket discovery diagnostics',
+    )
     parser.add_argument('--config', help='Path to config.json')
     parser.add_argument('--codex-home', help='Path to Codex data directory (default: CODEX_HOME or ~/.codex)')
     parser.add_argument('--no-codex', action='store_true', help='Do not include local Codex task history')
 
     args = parser.parse_args()
 
-    # Load config first (needed for db path)
+    # Load config before resolving ActivityWatch and Codex settings.
     script_dir = Path(__file__).parent
     config_path = Path(args.config) if args.config else script_dir / 'config.json'
     load_config(config_path)
 
-    # Database path: CLI arg > env var > config.json > default
-    db_path = args.db if args.db else get_db_path()
-    if not Path(db_path).exists():
-        print(f"Error: Database not found at {db_path}")
-        print("\nSet the database path in one of these ways:")
-        print("  1. config.json: \"database\": \"path/to/test.db\"")
-        print("  2. Environment: set AW_DATABASE=path/to/test.db")
-        print("  3. CLI argument: --db path/to/test.db")
+    try:
+        aw_host, aw_port, aw_timezone, aw_timeout = get_activitywatch_settings(
+            args.aw_host, args.aw_port
+        )
+        client = ActivityWatchRESTClient(aw_host, aw_port, aw_timeout)
+        if args.activitywatch_health:
+            print_activitywatch_health(activitywatch_health(client))
+            return
+    except ActivityWatchAPIError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     # Get date
     if args.date:
         if args.date.lower() == 'today':
-            target_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            target_date = datetime.now(aw_timezone).replace(hour=0, minute=0, second=0, microsecond=0)
         elif args.date.lower() == 'yesterday':
-            target_date = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            target_date = (datetime.now(aw_timezone) - timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
         else:
             target_date = parse_date(args.date)
             if not target_date:
@@ -1272,7 +1764,7 @@ Examples:
     else:
         # Interactive mode
         print("\n" + "=" * 80)
-        print("ACTIVITYWATCH WORKLOG ANALYZER (SQLite)")
+        print("ACTIVITYWATCH WORKLOG ANALYZER (REST API)")
         print("=" * 80)
         print("\nEnter date to analyze (formats: 2026-01-27, 27.01.2026, today, yesterday)")
 
@@ -1283,10 +1775,14 @@ Examples:
                 sys.exit(0)
 
             if date_input.lower() == 'today':
-                target_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                target_date = datetime.now(aw_timezone).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
                 break
             elif date_input.lower() == 'yesterday':
-                target_date = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                target_date = (datetime.now(aw_timezone) - timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
                 break
             else:
                 target_date = parse_date(date_input)
@@ -1295,8 +1791,15 @@ Examples:
             print("Invalid date format. Please try again.")
 
     # Analyze
-    print(f"Querying database for {target_date.strftime('%Y-%m-%d')}...")
-    results = analyze_day(db_path, target_date)
+    print(
+        f"Querying ActivityWatch at {aw_host}:{aw_port} for "
+        f"{target_date.strftime('%Y-%m-%d')} ({aw_timezone})..."
+    )
+    try:
+        results = analyze_day(client, target_date, aw_timezone)
+    except ActivityWatchAPIError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if not args.no_codex:
         codex_home = get_codex_home(args.codex_home)

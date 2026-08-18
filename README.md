@@ -42,7 +42,7 @@ Just ask in natural language:
 
 - An AI coding agent that can run shell commands and read repository files, such as Codex or [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - Python 3
-- [ActivityWatch](https://activitywatch.net/) running and collecting data
+- ActivityWatch v0.14.0b3 or newer with `aw-server-rust` running and collecting data
 - [GitHub CLI](https://cli.github.com/) authenticated for the repositories to audit
 
 ### Setup
@@ -54,7 +54,7 @@ cp config.example.json config.json
 ```
 
 Edit `config.json` with your details:
-- Set your `database` path to the ActivityWatch SQLite database
+- Configure the local ActivityWatch API host, port, and worklog timezone
 - Optionally set `codex_home`; otherwise `CODEX_HOME` or `~/.codex` is used
 - Add your `clients`, `contacts`, and `correlations`
 - Add `known_tickets` for better descriptions
@@ -81,6 +81,7 @@ python worklog.py yesterday --ai   # Yesterday's activity
 python worklog.py 24.02.2026 --ai  # Specific date
 python worklog.py today            # Detailed raw output
 python worklog.py today --no-codex # ActivityWatch only
+python worklog.py --activitywatch-health # Read-only source/bucket diagnostics
 python github_audit.py today --ai     # GitHub, PR, push/rewrite, and local git evidence
 ```
 
@@ -113,7 +114,10 @@ All of these work: `24.02.2026`, `2026-02-24`, `24/02/2026`, `today`, `yesterday
 
 | Section | Purpose |
 |---------|---------|
-| `database` | Path to your ActivityWatch SQLite DB |
+| `activitywatch.host` | Local `aw-server-rust` API host; defaults to `127.0.0.1` |
+| `activitywatch.port` | Local API port; defaults to `5600` |
+| `activitywatch.timezone` | IANA timezone used for worklog day boundaries |
+| `activitywatch.timeout_seconds` | Read request timeout |
 | `codex_home` | Optional Codex data directory; defaults to `CODEX_HOME` or `~/.codex` |
 | `github` | Login, timezone, local repository root, and git author aliases |
 | `moco.customer_projects` | Confirmed year-specific customer project/task IDs for synchronization |
@@ -132,15 +136,21 @@ See [`config.example.json`](config.example.json) for a full template.
 
 The `--ai` flag produces a compact summary that an AI can interpret into a worklog like this:
 
-**Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h | GitHub activity through 21:27**
+**Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h (Andromeda 2.1h; MacBook Pro 0.9h; 0.3h overlap) | GitHub activity through 21:27**
 
-| Cat | Client/Ticket | Description | Time |
-|-----|---------------|-------------|------|
-| Dev | PROJ-1234 | Implement user authentication flow | 4.5h |
-| Bug | BUG-5678 | Fix session timeout on login page | 45m |
-| Mtg | Acme (Jane Doe) | Sprint planning | 1h |
-| Review | PR #42 | Review payment integration | 30m |
-| Admin | — | Email, ticket triage | 30m |
+| Cat | Client/Ticket | Source | Description | Time |
+|-----|---------------|--------|-------------|------|
+| Dev | PROJ-1234 | Andromeda + MacBook Pro | Implement user authentication flow | 4.5h |
+| Bug | BUG-5678 | MacBook Pro | Fix session timeout on login page | 45m |
+| Mtg | Acme (Jane Doe) | Andromeda | Sprint planning | 1h |
+| Review | PR #42 | GitHub (device unknown) | Review payment integration | 30m |
+| Admin | — | Andromeda | Email, ticket triage | 30m |
+
+Every interpreted worklog includes the evidence source. Activity recorded for
+the same task on multiple devices remains one task row with all contributing
+sources; overlapping intervals are unioned rather than added. Evidence such as
+a GitHub event that cannot prove the physical device is labeled as unknown
+instead of being assigned to a machine by assumption.
 
 ## How AI time estimation works
 
@@ -163,13 +173,42 @@ When local Codex state is available, the analyzer reads `state_5.sqlite` and the
 
 Codex spans are semantic evidence, not billable durations. Tasks can run concurrently or continue in the background, so the output labels both the task span and its overlap with merged ActivityWatch `not-afk` intervals. The analyzer also prints a conservative ActivityWatch + qualifying-Codex evidence-union candidate; the agent validates its extensions against git, review, build, foreground, and outcome evidence before using it. The agent splits unsupported gaps, unions accepted intervals to prevent double counting, rounds only after attribution, and labels medium/low-confidence estimates. Contractual billability comes from Jira/MOCO rules—never a percentage of ActivityWatch time. Only compact task and outcome summaries are printed; raw prompts and tool output are not dumped.
 
-## Database Location
+## ActivityWatch API and multi-device sync
 
-The script looks for the ActivityWatch database in this order:
+The analyzer never opens ActivityWatch's private SQLite files. It reads
+`/api/0/info`, `/api/0/buckets/`, and bounded bucket-event endpoints from the
+local Rust server. Connection settings resolve in this order:
 
-1. `--db` CLI argument
-2. `AW_DATABASE` environment variable
-3. `database` field in `config.json`
+1. `--aw-host` and `--aw-port`
+2. `AW_HOST` and `AW_PORT`
+3. `activitywatch` settings in `config.json`
+4. `127.0.0.1:5600`
+
+`aw-sync` does not make OneDrive files directly queryable. On the central
+machine it must first pull each device's staging database into the local
+server. The analyzer then discovers window, AFK, browser, and editor buckets by
+API metadata, reports their source machines, removes exact imported replicas,
+and unions `not-afk` intervals across machines.
+
+Some watchers and browser extensions preserve an old hostname or use a device
+GUID as `$aw.sync.origin`. Configure `activitywatch.source_aliases` to map every
+known label for one physical device to a canonical source. Aliases are resolved
+case-insensitively before bucket coverage, exact-event deduplication, AFK union,
+and provenance reporting. Health output retains the raw-to-canonical mappings
+for auditability. Add the canonical names to `activitywatch.expected_sources`
+to warn when a participating machine is entirely absent. The health command
+also reports per-source bucket coverage and the latest API-visible timestamp.
+
+Pull-only `aw-sync` still initializes an empty staging database for the central
+server's device ID. It remains at zero buckets/events because local data is not
+pushed, but deleting it is ineffective: the next pull pass recreates it. Keep
+the small empty database and judge freshness from satellite staging files and
+the imported API buckets, not the central staging file timestamp.
+
+For a central collector, run `aw-sync --sync-dir <path> daemon --mode pull` only
+on the central machine and `aw-sync --sync-dir <path> daemon --mode push` on
+satellites. (`--sync-dir` is a global option and must precede `daemon`.) Do not use the default
+bidirectional daemon for this topology.
 
 It resolves the Codex data directory separately in this order:
 

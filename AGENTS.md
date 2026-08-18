@@ -8,11 +8,11 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 ## Important Files
 
-- `worklog.py` - Primary script. Reads ActivityWatch plus local Codex root-task history.
+- `worklog.py` - Primary script. Reads every API-visible local/synced ActivityWatch bucket plus local Codex root-task history.
 - `github_audit.py` - Audits GitHub, PR, push/rewrite, and local-git evidence.
 - `moco_sync.py` - Idempotently dry-runs/applies an approved JSON worklog to MOCO.
 - `worklog.example.json` - Input structure for `moco_sync.py`.
-- `config.json` - Local configuration for database path, clients, contacts, correlations, projects, and ticket metadata.
+- `config.json` - Local configuration for the ActivityWatch API, clients, contacts, correlations, projects, and ticket metadata.
 - `config.example.json` - Template for new setups.
 
 ## Required Workflow
@@ -23,6 +23,14 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    ```bash
    python worklog.py <date> --ai
    ```
+
+   The script talks only to the read-only local ActivityWatch API. Synced data
+   appears after `aw-sync` has pulled it into the central server. Review the
+   reported source list and warnings. Configure `activitywatch.expected_sources`
+   when an entirely absent participating machine must be detected.
+   Configured `activitywatch.source_aliases` canonicalize legacy hostnames and
+   device GUIDs before deduplication and aggregation; preserve the reported raw
+   alias mapping when explaining provenance.
 
    On this Windows machine, use `python`, not `python3`.
 
@@ -303,10 +311,12 @@ Use short category labels so the table renders cleanly:
 - Infra
 - Admin
 
-Summary line format:
+Summary line format. When ActivityWatch contains more than one source, include
+each source's interaction total and the cross-source overlap removed by the
+combined union:
 
 ```text
-Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h | GitHub activity through 21:27
+Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h (Andromeda 2.1h; MacBook Pro 0.9h; 0.3h overlap) | GitHub activity through 21:27
 ```
 
 Without explicitly supplied calendar evidence, do not turn gaps between these
@@ -323,12 +333,23 @@ explicitly:
 Table format:
 
 ```markdown
-| Cat | Client/Ticket | Description | Time |
-|-----|---------------|-------------|------|
-| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Feature description | 4.5h |
-| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | Issue description | 30m |
-| Mtg | Client (Contact) | Meeting topic | 1h |
+| Cat | Client/Ticket | Source | Description | Time |
+|-----|---------------|--------|-------------|------|
+| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Andromeda + MacBook Pro | Feature description | 4.5h |
+| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | MacBook Pro | Issue description | 30m |
+| Mtg | Client (Contact) | Andromeda | Meeting topic | 1h |
 ```
+
+Every worklog row must contain a `Source` value. Use the friendly labels
+`Andromeda` and `MacBook Pro` for the configured ActivityWatch sources
+`andromeda` and `macbook-pro`. The source identifies where the evidence was
+recorded; it is not a separate customer, task, or time allocation dimension.
+When the same task appears on multiple machines, keep one MOCO-homogeneous row,
+list all contributing sources (for example `Andromeda + MacBook Pro`), and use
+the union of accepted intervals so simultaneous work is not counted twice. Do
+not split a task solely because its evidence crossed devices. For evidence that
+cannot be attributed to a physical device, state that explicitly, for example
+`GitHub (device unknown)` or `Codex history (Andromeda)`; never silently guess.
 
 Additional notes or uncertainty can follow after the table, but the table must come first.
 Include a compact GitHub audit note naming the repositories covered, the number
