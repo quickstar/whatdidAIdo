@@ -2,6 +2,7 @@ aw-buckets-export.json
 config.json
 *.db
 __pycache__/
+.t3-reader/
 *.py[cod]
 github-audit*.json
 approved-worklog*.json

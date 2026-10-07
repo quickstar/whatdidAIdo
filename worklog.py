@@ -1286,10 +1286,14 @@ def print_ai_summary_v2(results, target_date):
         print(f"**Merged not-AFK overlap removed: {format_duration(overlap_removed)}**")
     evidence_union = results.get('evidence_union_seconds', results['total_active'])
     codex_union_count = len(results.get('evidence_union_codex_task_ids', []))
-    print(
-        f"**Evidence Union Candidate: {evidence_union / 3600:.1f}h "
-        f"(merged ActivityWatch + {codex_union_count} qualifying Codex root tasks; validate extensions)**"
-    )
+    if results.get('chat_source') == 't3':
+        print(f'**Interaction baseline: {evidence_union / 3600:.1f}h '
+              '(T3 attended sessions require separate validation; agent runtime is not added)**')
+    else:
+        print(
+            f"**Evidence Union Candidate: {evidence_union / 3600:.1f}h "
+            f"(merged ActivityWatch + {codex_union_count} qualifying Codex root tasks; validate extensions)**"
+        )
 
     if results['active_periods']:
         first = results['active_periods'][0][0].strftime('%H:%M')
@@ -1703,6 +1707,37 @@ def print_summary(results, target_date):
     print()
 
 
+def resolve_chat_source(requested=None):
+    """Select one transcript authority; source failure never changes this choice."""
+    source = requested or CONFIG.get('chat_history', {}).get('source', 'auto')
+    if source == 'auto':
+        t3 = CONFIG.get('t3', {})
+        return 't3' if t3.get('sources') or t3.get('client_cache') else 'codex'
+    if source not in ('t3', 'codex', 'none'):
+        raise ValueError(f'Invalid chat history source: {source}')
+    return source
+
+
+def collect_chat_history(source, target_date, local_timezone, active_intervals, codex_home=None):
+    result = {'chat_source': source, 'codex_tasks': []}
+    if source == 't3':
+        import t3_history
+        start = target_date.replace(tzinfo=local_timezone, hour=0, minute=0, second=0, microsecond=0)
+        settings = CONFIG.get('t3', {})
+        result['t3_history'] = t3_history.collect(
+            settings.get('sources', []), start, start + timedelta(days=1), settings.get('client_cache'),
+        )
+        if not result['t3_history']['sources']:
+            result['t3_history']['warnings'].append('T3 selected but no transcript sources configured; coverage unknown')
+    elif source == 'codex':
+        result['codex_tasks'] = analyze_codex_history(
+            codex_home or get_codex_home(), target_date, active_intervals,
+        )
+    elif source != 'none':
+        raise ValueError(f'Invalid chat history source: {source}')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Analyze API-visible ActivityWatch data for worklog generation.',
@@ -1726,7 +1761,12 @@ Examples:
     )
     parser.add_argument('--config', help='Path to config.json')
     parser.add_argument('--codex-home', help='Path to Codex data directory (default: CODEX_HOME or ~/.codex)')
+    parser.add_argument('--chat-source', choices=('auto', 't3', 'codex', 'none'),
+                        help='One chat source per run; auto prefers configured T3, otherwise legacy Codex')
+    parser.add_argument('--output', help='Save complete analyzer evidence as JSON for reuse without recollection')
     parser.add_argument('--no-codex', action='store_true', help='Do not include local Codex task history')
+    parser.add_argument('--no-t3', action='store_true', help='Do not include configured T3 conversation history')
+    parser.add_argument('--t3-output', help='Save full requested-day T3 conversation evidence as local JSON')
 
     args = parser.parse_args()
 
@@ -1734,6 +1774,15 @@ Examples:
     script_dir = Path(__file__).parent
     config_path = Path(args.config) if args.config else script_dir / 'config.json'
     load_config(config_path)
+
+    try:
+        chat_source = resolve_chat_source(args.chat_source)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if (chat_source == 't3' and args.no_t3) or (chat_source == 'codex' and args.no_codex):
+        chat_source = 'none'
+    if args.t3_output and chat_source != 't3':
+        parser.error('--t3-output requires T3 chat collection')
 
     try:
         aw_host, aw_port, aw_timezone, aw_timeout = get_activitywatch_settings(
@@ -1801,17 +1850,29 @@ Examples:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if not args.no_codex:
-        codex_home = get_codex_home(args.codex_home)
-        results['codex_tasks'] = analyze_codex_history(
-            codex_home,
-            target_date,
-            results.get('active_intervals', []),
-        )
+    results.update(collect_chat_history(
+        chat_source, target_date, aw_timezone, results.get('active_intervals', []),
+        get_codex_home(args.codex_home) if chat_source == 'codex' else None,
+    ))
+    print(f'Chat history source: {chat_source} (one transcript source per run)')
 
     results.update(calculate_evidence_union(results))
 
-    if results['total_active'] == 0 and not results.get('codex_tasks'):
+    if args.t3_output:
+        Path(args.t3_output).write_text(
+            json.dumps(results['t3_history'], ensure_ascii=False, indent=2), encoding='utf-8'
+        )
+    if args.output:
+        Path(args.output).write_text(
+            json.dumps({'date': target_date.strftime('%Y-%m-%d'), 'timezone': str(aw_timezone),
+                        'collected_at': datetime.now(aw_timezone).isoformat(), **results},
+                       ensure_ascii=False, indent=2, default=str), encoding='utf-8'
+        )
+
+    if results['total_active'] == 0 and not results.get('codex_tasks') and not results.get('t3_history', {}).get('chats'):
+        if results.get('t3_history'):
+            import t3_history
+            t3_history.print_summary(results['t3_history'], aw_timezone)
         print(f"\nNo activity found for {target_date.strftime('%Y-%m-%d')}")
         sys.exit(1)
 
@@ -1819,6 +1880,9 @@ Examples:
         print_ai_summary_v2(results, target_date)
     else:
         print_summary(results, target_date)
+    if results.get('t3_history'):
+        import t3_history
+        t3_history.print_summary(results['t3_history'], aw_timezone)
 
 
 if __name__ == '__main__':

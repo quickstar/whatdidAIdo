@@ -12,6 +12,17 @@
     "expected_sources": ["andromeda", "macbook-pro"]
   },
   "codex_home": "C:\\Users\\you\\.codex",
+  "chat_history": { "source": "auto" },
+  "t3": {
+    "client_cache": {
+      "indexeddb_directory": "C:/Users/you/AppData/Roaming/t3code/IndexedDB",
+      "reader_path": "D:/git/work/.t3-reader"
+    },
+    "sources": [
+      { "name": "local-server", "database": "C:/Users/you/.t3/userdata/state.sqlite" },
+      { "name": "remote-server", "environment_id": "replace-with-server-environment-id" }
+    ]
+  },
 
   "github": {
     "login": "your-github-login",
