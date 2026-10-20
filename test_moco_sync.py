@@ -74,6 +74,42 @@ class FakeClient:
 
 
 class MocoSyncTests(unittest.TestCase):
+    def test_explicit_date_move_keeps_id_and_does_not_touch_same_ticket(self):
+        client = FakeClient()
+        first = moco_sync.synchronize(client, worklog(hours=1), CONFIG, apply=True)
+        earlier_id = first['results'][0]['id']
+        later = worklog('Weekend work', hours=2)
+        later['date'] = '2026-07-29'
+        later_id = moco_sync.synchronize(client, later, CONFIG, apply=True)['results'][0]['id']
+        moved = worklog('Weekend work', hours=2)
+        moved['activities'][0].update(existing_activity_id=later_id, previous_date='2026-07-29')
+        dry = moco_sync.synchronize(client, moved, CONFIG)
+        self.assertEqual('preserved-existing', dry['results'][0]['action'])
+        self.assertEqual({'current': '2026-07-29', 'desired': '2026-07-28'}, dry['results'][0]['differences']['date'])
+        result = moco_sync.synchronize(client, moved, CONFIG, apply=True, update_existing=True)
+        self.assertEqual(later_id, result['results'][0]['id'])
+        self.assertEqual(2, len(client.records))
+        self.assertEqual(3600, next(r for r in client.records if r['id']==earlier_id)['seconds'])
+        repeat = moco_sync.synchronize(client, moved, CONFIG, apply=True, update_existing=True)
+        self.assertEqual('unchanged', repeat['results'][0]['action'])
+
+    def test_missing_explicit_id_cannot_create_replacement(self):
+        approved = worklog()
+        approved['activities'][0]['existing_activity_id'] = 999
+        client = FakeClient()
+        with self.assertRaisesRegex(ValueError, 'refusing to create'):
+            moco_sync.synchronize(client, approved, CONFIG, apply=True, update_existing=True)
+        self.assertEqual([], client.created)
+
+    def test_wrong_ticket_explicit_id_is_rejected_before_writes(self):
+        client = FakeClient()
+        record = moco_sync.synchronize(client, worklog(), CONFIG, apply=True)['results'][0]['id']
+        approved = worklog()
+        approved['activities'][0].update(existing_activity_id=record, ticket='ROMSD-2')
+        with self.assertRaisesRegex(ValueError, 'different Jira identity'):
+            moco_sync.synchronize(client, approved, CONFIG, apply=True, update_existing=True)
+        self.assertEqual([], client.updated)
+
     def test_dry_run_resolves_mapping_without_writing(self):
         client = FakeClient()
         result = moco_sync.synchronize(client, worklog(), CONFIG)

@@ -180,7 +180,13 @@ def desired_payload(activity, default_date, config):
     if not ticket and not sync_key:
         raise ValueError('A non-ticket activity needs a stable sync_key.')
     customer = activity.get('customer')
-    activity_key = ticket or sync_key
+    existing_id = activity.get('existing_activity_id')
+    previous_date = activity.get('previous_date')
+    if previous_date:
+        datetime.strptime(previous_date, '%Y-%m-%d')
+        if not existing_id:
+            raise ValueError('previous_date requires an existing_activity_id.')
+    activity_key = f'moco:{int(existing_id)}' if existing_id else ticket or sync_key
     if not customer:
         raise ValueError(f'{activity_key} needs an explicit evidence-derived customer.')
     if 'billable' not in activity:
@@ -200,6 +206,8 @@ def desired_payload(activity, default_date, config):
         '_customer': customer_name,
         '_project_name': mapping.get('project_name'),
         '_task_name': mapping.get('task_name'),
+        '_existing_activity_id': int(existing_id) if existing_id else None,
+        '_previous_date': previous_date,
     }
     if ticket:
         payload.update({
@@ -277,6 +285,17 @@ def append_warning(warnings, warning):
 def find_existing(activities, payload, identity_state=None, warnings=None):
     ticket = str(payload.get('remote_id') or '').upper()
     sync_key = str(payload.get('_sync_key') or '').upper()
+
+    explicit_id = payload.get('_existing_activity_id')
+    if explicit_id:
+        match = next((a for a in activities if str(a.get('id')) == str(explicit_id)), None)
+        if match is None:
+            raise ValueError(f'Explicit MOCO activity {explicit_id} was not found; refusing to create a replacement.')
+        if match.get('date') not in (payload['date'], payload.get('_previous_date')):
+            raise ValueError(f'Explicit MOCO activity {explicit_id} has an unexpected date.')
+        if existing_remote_id(match) != ticket:
+            raise ValueError(f'Explicit MOCO activity {explicit_id} has a different Jira identity.')
+        return match
 
     def project_id(activity):
         return int((activity.get('project') or {}).get('id') or activity.get('project_id') or 0)
@@ -368,6 +387,9 @@ def desired_comparable(payload):
 def differences(existing, desired):
     current = comparable(existing)
     wanted = desired_comparable(desired)
+    if desired.get('_existing_activity_id'):
+        current['date'] = existing.get('date')
+        wanted['date'] = desired['date']
     return {
         key: {'current': current[key], 'desired': wanted[key]}
         for key in wanted
@@ -408,14 +430,18 @@ def synchronize(client, worklog, config, apply=False, update_existing=False, ide
         raise ValueError(f"Duplicate activity identity in worklog: {', '.join(duplicates)}")
     approved_seconds = approved_total_seconds(worklog, desired, warnings)
     dates = sorted({item['date'] for item in desired})
-    existing_by_date = {activity_date: client.activities(activity_date) for activity_date in dates}
+    lookup_dates = sorted(set(dates) | {item['_previous_date'] for item in desired if item.get('_previous_date')})
+    existing_by_date = {activity_date: client.activities(activity_date) for activity_date in lookup_dates}
+    existing_pool = [record for records in existing_by_date.values() for record in records]
+    # Resolve every explicit move before writing, and reject aliases targeting one record twice.
+    matches = [find_existing(existing_pool, item, identity_state, warnings) for item in desired]
+    matched_ids = [str(item['id']) for item in matches if item]
+    if len(matched_ids) != len(set(matched_ids)):
+        raise ValueError('Multiple approved rows resolve to the same MOCO activity.')
     results = []
 
-    for payload in desired:
+    for payload, existing in zip(desired, matches):
         activity_key = payload['_activity_key']
-        existing = find_existing(
-            existing_by_date[payload['date']], payload, identity_state, warnings,
-        )
         delta = differences(existing, payload) if existing else {}
         current_seconds = comparable(existing)['seconds'] if existing else 0
         if existing:

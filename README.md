@@ -31,7 +31,7 @@ Just ask in natural language:
 - **Git branch tracking** — Knows which ticket you were working on based on your active branch
 - **Complete GitHub audit** — Combines commit search, events, PRs, push comparisons, and local repositories
 - **Rewrite awareness** — Inspects rebases/squashes without double-counting the replacement commit
-- **Cross-server chat context** — Reads T3 server databases and desktop caches without SSH, with coverage warnings and deduplication
+- **Cross-server chat context** — Reads local T3 databases and authenticated remote histories without SSH or opening threads, with cache fallback and coverage checks
 - **Idempotent MOCO sync** — Preserves existing entries by default, keeps durable local identity for untagged work, verifies totals, and checks Jira links after writes
 - **Break detection** — Identifies gaps in activity (lunch, coffee, etc.)
 - **Smart context** — Distinguishes work YouTube (tutorials) from personal YouTube based on surrounding activity
@@ -230,15 +230,21 @@ It resolves the Codex data directory separately in this order:
 
 `worklog.py <date> --ai` also reads each database in `t3.sources`. Set `name`
 to a stable server identity and `database` to that server's local
-`userdata/state.sqlite`, or a consistent SQLite backup exported from it.
+`userdata/statev2.sqlite` for T3 v0.1 and later (`userdata/state.sqlite` for
+older installations), or a consistent SQLite backup exported from it. The
+reader prefers populated v2 conversation projections over frozen legacy
+projections and retains message origin and thread lineage for distinguishing
+human exchanges from scheduled prompts and delegated work. After upgrading
+the desktop, also verify the configured cache directory; v0.1 uses
+`AppData/Roaming/t3code-v2/IndexedDB` on this Windows installation.
 Never copy only a live database file while ignoring its WAL. Client pairing
 does not mean that all server databases have been synchronized locally.
 
-Declare every expected server, even before its database is accessible. A source
-without a database produces an explicit coverage warning, rather than zero work.
-The reader supports local databases and the desktop's cross-server IndexedDB
-cache, not yet authenticated remote T3 connections. Refresh remote exports separately and inspect the reported latest
-message timestamps; a readable database alone does not prove export freshness.
+Declare every expected server, even before its history is accessible. The reader
+supports local databases, authenticated remote reads and the desktop's
+cross-server IndexedDB cache. An unavailable source produces a coverage warning,
+rather than evidence of zero work. A readable database alone does not prove
+that an exported backup is current.
 
 The reader includes user/assistant messages across providers, including Claude
 Agent and Codex, and preserves server provenance separately from the unknown
@@ -256,7 +262,9 @@ and T3 turn spans are **not** added to work duration. Reconcile this semantic
 evidence with ActivityWatch and git before assigning time. Native Codex is an
 alternate collection mode, not a second routine source.
 
-For desktop cache collection without SSH, install the optional reader with
+### Setup and acquisition
+
+For desktop cache and live API collection, install the optional dependencies with
 `python -m pip install --target .t3-reader -r requirements-t3-cache.txt`. Set
 `t3.client_cache.indexeddb_directory` to the desktop profile's `IndexedDB`
 directory and `reader_path` to the absolute `.t3-reader` path. Each named source
@@ -268,15 +276,114 @@ The client cache is scanned once, and JSON bodies for environments already read
 from a server database are skipped. The underlying IndexedDB reader still scans
 shared storage records; this is not a claim that every disk byte is read once.
 
-Only the `shell` and `thread` object stores are read; the credential catalog is
-excluded. LevelDB sequence numbers reconcile obsolete values and tombstones.
+The IndexedDB reader reads only the `shell` and `thread` object stores.
+LevelDB sequence numbers reconcile obsolete values and tombstones.
+Current raw records and blob references are selected before deserialization,
+so removed blobs belonging to obsolete records do not break current history.
+Both legacy thread snapshots and v2 projection/message snapshots are supported;
+v2 history pagination and listed archived threads remain coverage checks.
 The cache is always marked partial: it can omit unopened and archived threads,
 retain stale state, or hold only a paginated part of a conversation. Output
 reports missing potentially relevant bodies and pagination. A live client can
 write while this read-only inspection runs, so it is not an atomic live snapshot.
-For complete collection, an authenticated API adapter must reconcile active and
-archived thread inventories and fetch missing history. No SSH is inherently
-required: T3 exposes authenticated HTTP and WebSocket read operations.
+For remote sources, enable `t3.live_http` to collect without opening threads or
+using SSH. `t3_live.py` reuses the existing Windows desktop pairing from
+`catalog` (the desktop `connection-catalog.json`) and `local_state` (the desktop
+profile's `Local State`), with the same optional `reader_path` dependency folder.
+Windows must permit the running user to unlock that pairing. Each source's
+`name` must exactly match the paired server hostname, and `environment_id` must
+match its saved environment. Credentials are decrypted only in memory and are
+excluded from evidence and error messages; redirects are refused.
+
+The adapter reads the active inventory and full thread snapshots over HTTP GET,
+and archived inventory through the read-only
+`orchestration.getArchivedShellSnapshot` WebSocket RPC. It fetches date-relevant
+threads across providers and saves full projections in
+`t3_history.live_evidence` in the main `--output` JSON
+(`live_evidence` at the root of a `--t3-output` export).
+The local server database remains authoritative. Remote coverage is
+`live_readable` only when both inventories and all candidate thread reads
+succeed; authentication, network, archive, or transcript failures remain explicit
+coverage warnings. The server must be reachable. Collection observes live
+snapshots, not an atomic transaction across servers.
+
+### Freshness gate and recovery
+
+Run the canonical `python worklog.py <date> --ai --output <absolute-path>.json`
+for a new review. The configured live adapter runs automatically; neither the
+desktop UI nor selecting/opening remote threads is required. It refreshes the
+saved evidence, not T3's private IndexedDB or server database.
+
+Before using saved evidence, check its `date`, `timezone`, `collected_at`,
+`t3_history.warnings`, and every `t3_history.sources` entry:
+
+- Local `readable` means the configured database was read. Confirm whether it
+  is the live server database or an exported backup.
+- Remote complete acquisition requires `status == "live_readable"`,
+  `live_http.archived_verified == true`, `live_http.complete == true`, and an
+  empty `live_http.failed_thread_ids`. Inspect `requested_threads` against the
+  candidate inventory and all remaining warnings.
+- Check `requested_day_messages`, `latest_message_at`, `shell_updated_at`,
+  `possibly_relevant_uncached_threads`, and `truncated_thread_ids`. A null shell
+  timestamp is unknown, not a fabricated collection time. Remote latest-message
+  time describes the histories fetched for this review, not necessarily every
+  message on the server.
+- Reconcile zero requested-day messages or old timestamps with human activity,
+  relevant inventory, and scoped user confirmations. A current title alone does
+  not prove that its transcript was collected. Cache-only, unresolved paginated,
+  archive-unverified and failed sources remain partial.
+
+Resume valid completed stages from saved JSON and checkpoint paths. For a
+reported gap, inspect only configuration, reader dependencies, Windows pairing
+access and the affected server's reachability. Apply the scheduled workflow's
+one transient retry limit, retaining stdout/stderr, exit status and retry count.
+After source recovery or a reader fix, rerun the affected canonical helper and
+reconcile the replacement evidence. Avoid duplicate running helpers and
+regenerating delivered reviews merely to test collection.
+
+If restoration fails, deliver the useful partial evidence with the affected
+source, last timestamps and concrete restoration step. Request user action only
+for an unmet prerequisite that cannot be repaired autonomously. The scheduler
+host/server must run, remote servers must be reachable, and the scheduled
+Windows account must be able to unlock the saved pairing. Keep tokens in memory;
+never print or persist credentials in evidence or diagnostics.
+
+### T3 tools and CLI
+
+Use T3's app-owned thread and scheduler tools for conversation/schedule actions;
+use `worklog.py` for evidence collection. The installed T3 v0.1.0 CLI's
+`--help` lists server/service/project/auth commands, but no transcript-export or
+cache-refresh command. Check the actual installed `--help` after upgrades
+instead of inventing `t3 threads`, `t3 sync`, or equivalent commands.
+
+In PowerShell, use `Get-Command t3` to locate an installed launcher, then
+`t3 --help`; invoke an explicitly resolved executable path with the `&` call
+operator if the launcher is absent. Use the execution tool's working-directory
+option when necessary, never `cd` or `git -C`. Running bare `t3`, `t3 start`, or
+`t3 serve` starts a server; it is not a history refresh. `t3 app` opens the UI
+and does not establish transcript completeness. Pairing/auth commands can mint
+or display credentials and are not routine read diagnostics.
+
+If app-owned tools are missing in an ACP session and `T3_ACP_MCP_NODE` is set,
+use the session's documented `acp-mcp-call` transport with its supplied runtime
+and optional entrypoint. That is an orchestration fallback, not the transcript
+collector. Follow the current injected tool schema rather than assuming CLI
+subcommands or flags are stable.
+
+## Generated files and local state
+
+Save reports, raw collector JSON, helper logs, approved worklogs and temporary
+analysis scripts outside the checkout. On this collector, use
+`C:/Users/Lukas/AppData/Local/T3CodeServer/data/worklog-review/reviews/<date-or-range>/`
+and pass absolute paths to `--output`. Keep historical evidence and MOCO
+receipts so interrupted runs can resume and delivered dates are not duplicated.
+Archive manifests in that state directory map older repository paths to their
+new locations.
+
+`config.json`, `.moco-sync-state.json` and `.t3-reader/` are ignored local runtime
+files/dependencies and remain in place. In particular, preserve the MOCO ledger.
+The ignore rules for generated reports are a backstop; new outputs belong in
+the external state directory.
 
 ## License
 

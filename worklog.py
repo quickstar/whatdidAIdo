@@ -591,6 +591,8 @@ def analyze_day(client, target_date, timezone=None):
     bucket_types_by_source = defaultdict(set)
     seen_events = set()
     source_not_afk = defaultdict(list)
+    source_events = defaultdict(int)
+    source_latest_updates = {}
     raw_not_afk_intervals = []
 
     for bucket in relevant_buckets:
@@ -598,6 +600,12 @@ def analyze_day(client, target_date, timezone=None):
         kind = SUPPORTED_BUCKET_TYPES[bucket['type']]
         bucket_counts[source][kind] += 1
         bucket_types_by_source[source].add(kind)
+        metadata = bucket.get('metadata')
+        metadata_end = metadata.get('end') if isinstance(metadata, dict) else None
+        for value in (bucket.get('last_updated'), metadata_end):
+            updated = parse_codex_timestamp(value)
+            if updated is not None:
+                source_latest_updates[source] = max(source_latest_updates.get(source, updated), updated)
         for raw_event in client.get_events(bucket['id'], day_start, day_end):
             if isinstance(raw_event, dict):
                 try:
@@ -611,6 +619,7 @@ def analyze_day(client, target_date, timezone=None):
                 results['activitywatch_malformed_events'] += 1
                 continue
             start, end, data = parsed
+            source_events[source] += 1
             fingerprint = activitywatch_event_fingerprint(source, kind, start, end, data)
             if fingerprint in seen_events:
                 results['activitywatch_duplicate_events'] += 1
@@ -703,6 +712,18 @@ def analyze_day(client, target_date, timezone=None):
     if missing_expected_sources:
         results['activitywatch_warnings'].append(
             'Expected ActivityWatch sources are absent: ' + ', '.join(missing_expected_sources)
+        )
+    for source in sorted(set(expected_sources) & set(results['activitywatch_sources'])):
+        if source_events[source]:
+            continue
+        latest = source_latest_updates.get(source)
+        detail = 'latest bucket update unknown'
+        if latest is not None:
+            last_update = datetime.fromtimestamp(latest, timezone).isoformat()
+            detail = f'latest bucket update {last_update}'
+        results['activitywatch_warnings'].append(
+            f'Expected source {source} has no events for {day_start:%Y-%m-%d} '
+            f'({detail}); coverage is unconfirmed, not proof of no work. Check device sync.'
         )
     for source in results['activitywatch_sources']:
         missing = {'afk', 'window'} - bucket_types_by_source[source]
@@ -1726,6 +1747,7 @@ def collect_chat_history(source, target_date, local_timezone, active_intervals, 
         settings = CONFIG.get('t3', {})
         result['t3_history'] = t3_history.collect(
             settings.get('sources', []), start, start + timedelta(days=1), settings.get('client_cache'),
+            settings.get('live_http'),
         )
         if not result['t3_history']['sources']:
             result['t3_history']['warnings'].append('T3 selected but no transcript sources configured; coverage unknown')

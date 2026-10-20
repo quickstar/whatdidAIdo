@@ -332,6 +332,40 @@ class CodexHistoryTests(unittest.TestCase):
             health['coverage_warnings'],
         )
 
+    def test_present_but_stale_expected_source_warns_in_day_review(self):
+        worklog.CONFIG['activitywatch'] = {
+            'source_aliases': {'Lukass-MacBook-Pro.local': 'macbook-pro'},
+            'expected_sources': ['macbook-pro'],
+        }
+        zurich = worklog.resolve_timezone('Europe/Zurich')
+        buckets = [
+            {'id': 'mac-afk', 'type': 'afkstatus', 'hostname': 'Lukass-MacBook-Pro.local',
+             'last_updated': '2026-08-30T10:45:35Z'},
+            {'id': 'mac-window', 'type': 'currentwindow', 'hostname': 'Lukass-MacBook-Pro.local',
+             'metadata': {'end': '2026-08-30T10:45:40Z'}},
+        ]
+        result = worklog.analyze_day(
+            FakeActivityWatchClient(buckets, {}), datetime(2026, 9, 9), zurich,
+        )
+        warning = next(warning for warning in result['activitywatch_warnings']
+                       if 'Expected source macbook-pro has no events' in warning)
+        self.assertIn('2026-09-09', warning)
+        self.assertIn('2026-08-30T12:45:40+02:00', warning)
+        self.assertIn('not proof of no work', warning)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            worklog.print_ai_summary_v2(result, datetime(2026, 9, 9))
+        self.assertIn(warning, output.getvalue())
+
+        # Recorded AFK is real day coverage even when interaction time is zero.
+        events = {'mac-afk': [aw_event(datetime(2026, 9, 9, 9, tzinfo=zurich),
+                                       3600, {'status': 'afk'})]}
+        fresh = worklog.analyze_day(
+            FakeActivityWatchClient(buckets, events), datetime(2026, 9, 9), zurich,
+        )
+        self.assertEqual(0, fresh['total_active'])
+        self.assertFalse(any('has no events' in warning for warning in fresh['activitywatch_warnings']))
+
     def test_activitywatch_source_alias_cycles_are_rejected(self):
         worklog.CONFIG['activitywatch'] = {
             'source_aliases': {'Mac': 'Macbook', 'Macbook': 'Mac'}

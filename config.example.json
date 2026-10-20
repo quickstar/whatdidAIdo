@@ -14,13 +14,19 @@
   "codex_home": "C:\\Users\\you\\.codex",
   "chat_history": { "source": "auto" },
   "t3": {
+    "live_http": {
+      "enabled": false,
+      "reader_path": "D:/git/work/.t3-reader",
+      "local_state": "C:/Users/you/AppData/Roaming/t3code-v2/Local State",
+      "catalog": "C:/Users/you/.t3/userdata/connection-catalog.json"
+    },
     "client_cache": {
       "indexeddb_directory": "C:/Users/you/AppData/Roaming/t3code/IndexedDB",
       "reader_path": "D:/git/work/.t3-reader"
     },
     "sources": [
       { "name": "local-server", "database": "C:/Users/you/.t3/userdata/state.sqlite" },
-      { "name": "remote-server", "environment_id": "replace-with-server-environment-id" }
+      { "name": "remote.example.com", "environment_id": "replace-with-server-environment-id" }
     ]
   },
 

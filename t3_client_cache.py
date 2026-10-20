@@ -4,6 +4,16 @@ import sys
 from pathlib import Path
 
 
+def latest_raw_records(records):
+    """Select current bodies AND blob references before any deserialization."""
+    latest = {}
+    for record in records:
+        key = record.user_key
+        if key not in latest or record.seq > latest[key].seq:
+            latest[key] = record
+    return list(latest.values())
+
+
 def latest_documents(records, excluded_environment_ids=()):
     """LevelDB exposes old versions; the highest sequence, even deletion, wins."""
     latest = {}
@@ -34,6 +44,16 @@ def read(settings, excluded_environment_ids=()):
     # LevelDB engine or changing the running client's lock/state.
     with WrappedIndexDB(root / 't3code_app_0.indexeddb.leveldb',
                         root / 't3code_app_0.indexeddb.blob') as wrapper:
+        # CCL's forensic iterator otherwise deserializes obsolete versions and
+        # chooses blob references in physical file order. Chromium may already
+        # have deleted those old blobs. Restrict the in-memory view, not disk.
+        # Keep tombstones until latest selection so deleted data never revives.
+        from ccl_chromium_reader.storage_formats.ccl_leveldb import KeyState
+        raw = wrapper._raw_db
+        raw._fetched_records = [
+            record for record in latest_raw_records(raw._fetched_records)
+            if record.state == KeyState.Live
+        ]
         database = wrapper['t3code:connection-runtime']
         # Deliberately exclude catalog/auth stores and browser history.
         return {kind: latest_documents(database[kind].iterate_records(),
@@ -53,12 +73,17 @@ def rows_for_source(cache, environment_id, start, end):
     rows, timestamps, truncated = [], [], []
     cached_ids = set()
     for snapshot in snapshots:
-        thread = snapshot['thread']
+        projection = snapshot.get('projection', snapshot)
+        thread = projection['thread']
         cached_ids.add(thread['id'])
-        if snapshot.get('page', {}).get('hasMore'):
+        if snapshot.get('hasMoreHistory') or snapshot.get('page', {}).get('hasMore'):
             truncated.append(thread['id'])
         project = projects.get(thread['projectId'], {})
-        for message in thread['messages']:
+        providers = projection.get('providerThreads', [])
+        provider_name = (thread.get('session') or {}).get('providerName')
+        if not provider_name and providers:
+            provider_name = providers[-1].get('driver')
+        for message in projection.get('messages', thread.get('messages', [])):
             timestamps.append(_instant(message['updatedAt']))
             created, updated = _instant(message['createdAt']), _instant(message['updatedAt'])
             if not (start <= created < end or start <= updated < end):
@@ -66,17 +91,23 @@ def rows_for_source(cache, environment_id, start, end):
             rows.append({
                 'thread_id': thread['id'], 'title': thread['title'], 'branch': thread.get('branch'),
                 'project': project.get('title'), 'workspace_root': project.get('workspaceRoot'),
-                'provider_name': (thread.get('session') or {}).get('providerName'),
-                'message_id': message['id'], 'turn_id': message.get('turnId'),
+                'provider_name': provider_name,
+                'message_id': message['id'], 'turn_id': message.get('turnId', message.get('runId')),
+                'created_by': message.get('createdBy'),
+                'creation_source': message.get('creationSource'),
+                'lineage': thread.get('lineage'),
                 'role': message['role'], 'text': message['text'],
                 'created_at': message['createdAt'], 'updated_at': message['updatedAt'],
             })
-    uncached = [t for t in shell['threads'] if t['id'] not in cached_ids]
+    archived = shell.get('archivedThreads', [])
+    listed = {t['id']: t for t in [*shell['threads'], *archived]}
+    uncached = [t for t in listed.values() if t['id'] not in cached_ids]
     possibly_relevant = [t['id'] for t in uncached if _instant(t['updatedAt']) >= start
                          and _instant(t['createdAt']) < end]
     coverage = {
-        'listed_threads': len(shell['threads']), 'cached_threads': len(snapshots),
-        'shell_updated_at': shell['updatedAt'], 'uncached_thread_ids': [t['id'] for t in uncached],
+        'listed_threads': len(listed), 'cached_threads': len(snapshots),
+        'archived_threads': len(archived),
+        'shell_updated_at': shell.get('updatedAt'), 'uncached_thread_ids': [t['id'] for t in uncached],
         'possibly_relevant_uncached_threads': possibly_relevant, 'truncated_thread_ids': truncated,
     }
     latest = max(timestamps).isoformat() if timestamps else None

@@ -4,6 +4,7 @@ Each configured database represents one server or a consistent SQLite backup of
 that server. Pairing a client is not proof that remote transcripts are local.
 """
 import os
+import json
 import re
 import sqlite3
 from contextlib import closing
@@ -25,6 +26,34 @@ def _read(database, start, end):
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
         db.execute('BEGIN')
+        # v0.1 migrates historical messages into the v2 projection, while
+        # leaving the legacy projection frozen. Read the authoritative view
+        # once rather than combining migrated copies with their old versions.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='orchestration_v2_projection_messages'").fetchone():
+            latest = db.execute('SELECT MAX(updated_at) FROM orchestration_v2_projection_messages').fetchone()[0]
+            if latest is not None:
+                rows = db.execute('''
+                    SELECT m.*, t.title, t.payload_json AS thread_payload,
+                           t.default_provider AS provider_name,
+                           p.title AS project, p.workspace_root
+                    FROM orchestration_v2_projection_messages m
+                    JOIN orchestration_v2_projection_threads t ON t.thread_id=m.thread_id
+                    LEFT JOIN projection_projects p ON p.project_id=t.project_id
+                    WHERE (julianday(m.created_at)>=julianday(?) AND julianday(m.created_at)<julianday(?))
+                       OR (julianday(m.updated_at)>=julianday(?) AND julianday(m.updated_at)<julianday(?))
+                    ORDER BY m.created_at,m.message_id
+                ''', (start.isoformat(), end.isoformat()) * 2).fetchall()
+                normalized = []
+                for record in rows:
+                    row = dict(record)
+                    payload = json.loads(row.pop('payload_json'))
+                    thread = json.loads(row.pop('thread_payload'))
+                    row.update(text=payload.get('text', ''), turn_id=row.pop('run_id'),
+                               branch=thread.get('branch'), created_by=payload.get('createdBy'),
+                               creation_source=payload.get('creationSource'),
+                               lineage=thread.get('lineage'))
+                    normalized.append(row)
+                return latest, normalized
         latest = db.execute('SELECT MAX(updated_at) FROM projection_thread_messages').fetchone()[0]
         rows = db.execute('''
             SELECT m.*, t.title, t.branch, p.title AS project,
@@ -40,7 +69,7 @@ def _read(database, start, end):
         return latest, [dict(row) for row in rows]
 
 
-def collect(sources, start, end, client_cache=None):
+def collect(sources, start, end, client_cache=None, live_http=None):
     """Collect a half-open local day, keeping unavailable servers explicit.
 
     Message IDs plus thread ID identify migrated copies. Conflicting copies are
@@ -82,18 +111,43 @@ def collect(sources, start, end, client_cache=None):
             result['warnings'].append(f'T3 client cache unavailable ({type(exc).__name__}); check reader dependency and cache integrity')
     chats = {}
     seen = {}
+    live_catalog = None
+    if live_http and live_http.get('enabled'):
+        try:
+            import t3_live
+            live_catalog = t3_live.desktop_catalog(live_http)
+        except Exception as exc:
+            result['warnings'].append(
+                f'T3 live authentication unavailable ({type(exc).__name__}); using saved evidence')
+        result['live_evidence'] = {}
     for source in sources:
         name = source['name']
         coverage = {'name': name, 'status': 'unavailable', 'latest_message_at': None,
                     'requested_day_messages': 0}
         result['sources'].append(coverage)
-        from_cache = not source.get('database') and cache is not None and source.get('environment_id')
+        source_cache = cache
+        live_coverage = None
+        if live_catalog is not None and not source.get('database') and source.get('environment_id'):
+            try:
+                client = t3_live.Client(live_catalog, source['environment_id'], source['name'])
+                source_cache, live_coverage = t3_live.collect(client, source['environment_id'], start, end)
+                result['live_evidence'][name] = source_cache
+                coverage['live_http'] = live_coverage
+                if not live_coverage['complete']:
+                    result['warnings'].append(
+                        f'{name}: live read incomplete; archived verified={live_coverage["archived_verified"]}; '
+                        f'{len(live_coverage["failed_thread_ids"])} thread reads failed')
+            except Exception as exc:
+                result['warnings'].append(
+                    f'{name}: live read unavailable ({type(exc).__name__}); using saved evidence')
+        from_cache = not source.get('database') and source_cache is not None and source.get('environment_id')
         if not source.get('database') and not from_cache:
             result['warnings'].append(f'{name}: no readable transcript database/export configured; coverage unknown')
             continue
         try:
             if from_cache:
-                latest, rows, cache_coverage = t3_client_cache.rows_for_source(cache, source['environment_id'], start, end)
+                import t3_client_cache
+                latest, rows, cache_coverage = t3_client_cache.rows_for_source(source_cache, source['environment_id'], start, end)
                 coverage.update(cache_coverage)
             else:
                 key = os.path.normcase(str(Path(os.path.expandvars(source['database'])).expanduser().resolve()))
@@ -112,7 +166,9 @@ def collect(sources, start, end, client_cache=None):
             result['warnings'].append(f'{name}: transcript read failed ({type(exc).__name__}: {exc})')
             continue
         coverage.update(status='cached_partial' if from_cache else 'readable', latest_message_at=latest, requested_day_messages=len(rows))
-        if from_cache:
+        if live_coverage is not None:
+            coverage['status'] = 'live_readable' if live_coverage['complete'] else 'live_partial'
+        elif from_cache:
             result['warnings'].append(
                 f'{name}: cached transcripts only ({coverage["cached_threads"]}/{coverage["listed_threads"]} listed threads); '
                 f'{len(coverage["possibly_relevant_uncached_threads"])} uncached threads may intersect this day; '
@@ -128,6 +184,8 @@ def collect(sources, start, end, client_cache=None):
                 'tickets': set(), 'messages': [],
             })
             chat['sources'].add(name)
+            if row.get('lineage'):
+                chat['lineage'] = row['lineage']
             if row['provider_name']:
                 chat['providers'].add(row['provider_name'])
             context = f"{row['title']} {row['branch'] or ''}"
@@ -144,6 +202,9 @@ def collect(sources, start, end, client_cache=None):
             if previous:
                 result['warnings'].append(f'{name}: conflicting copies of message {row["message_id"]}; retained for reconciliation')
             message = {key: row[key] for key in ('message_id', 'turn_id', 'role', 'text', 'created_at', 'updated_at')}
+            for key in ('created_by', 'creation_source'):
+                if key in row:
+                    message[key] = row[key]
             message.update(sources=[name], continued_from_previous_day=_instant(row['created_at']) < start,
                            updated_after_requested_day=_instant(row['updated_at']) >= end)
             if message['updated_after_requested_day']:

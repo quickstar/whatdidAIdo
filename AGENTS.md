@@ -10,6 +10,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 - `worklog.py` - Canonical collector for ActivityWatch and one selected chat source.
 - `t3_history.py` / `t3_client_cache.py` - Provider-independent T3 database/cache readers, called by `worklog.py`.
+- `t3_live.py` - Authenticated remote T3 history reads through existing Windows desktop pairings, called by `worklog.py`.
 - `github_audit.py` - Audits GitHub, PR, push/rewrite, and local-git evidence.
 - `moco_sync.py` - Idempotently dry-runs/applies an approved JSON worklog to MOCO.
 - `worklog.example.json` - Input structure for `moco_sync.py`.
@@ -22,9 +23,10 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 2. Run the primary script for the requested date:
 
    ```bash
-   python worklog.py <date> --ai --output worklog-evidence-<date>.json
+   python worklog.py <date> --ai --output <evidence-dir>/worklog-<date>.json
    ```
 
+   Set `<evidence-dir>` to the external dated directory in **Generated Artifacts**.
    The script reads the local ActivityWatch API and configured chat stores read-only. Synced ActivityWatch data
    appears after `aw-sync` has pulled it into the central server. Review the
    reported source list and warnings. Configure `activitywatch.expected_sources`
@@ -40,7 +42,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 3. Run the deterministic GitHub and local-git audit:
 
    ```bash
-   python github_audit.py <date> --ai --output github-audit-<date>.json
+   python github_audit.py <date> --ai --output <evidence-dir>/github-<date>.json
    ```
 
    Retain the full JSON for commit bodies, file lists, patches, and PR associations
@@ -70,6 +72,9 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 ## Chat Evidence Collection
 
+- Before T3 collection, CLI troubleshooting, or cache-gap recovery, read
+  [T3 Code conversation evidence](README.md#t3-code-conversation-evidence),
+  including its freshness gate and CLI guidance.
 - T3 is the primary source when configured. The canonical helper reads all
   providers, including Claude Agent and Codex, across configured environments.
   One run selects exactly one chat source. `--chat-source codex` is an explicit
@@ -84,12 +89,13 @@ When the user asks questions such as "what did I do today?", "what did I do yest
   precedence over its cached conversation bodies. Aliased database paths reuse
   acquired rows; exact message copies merge by thread/message identity, content,
   and timestamps. Conflicting revisions remain flagged for reconciliation.
-- Prefer the local T3 database and desktop cache; the user prefers no SSH.
-  A paired client can show several servers without caching every transcript.
-  Review each environment's latest message/shell timestamps, uncached relevant
-  threads, pagination, and archived/unseen coverage. Cache-only sources remain
-  partial. For unresolved bodies, use an available authenticated T3 API or
-  report the exact gap; the current scripts do not implement live API fetching.
+- Use the local server database and configured `t3.live_http` remote reads
+  through `worklog.py`; the desktop cache is a partial fallback. Fetch current
+  remote inventories and full relevant histories without asking the user to
+  open T3 or select threads. Fresh saved evidence does not require mutating
+  T3's private cache. Verify every environment using the README freshness gate;
+  title sync and helper exit status alone do not establish coverage. A failed
+  live read remains a gap. Reuse valid completed evidence before collecting again.
 - Preserve server/environment provenance separately from physical client
   identity. Use `T3 Orion server (client unknown)` when that is all the evidence
   establishes. Cross-reference ActivityWatch only when it proves the client.
@@ -105,6 +111,22 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 - Record user-confirmed holidays/device inactivity with their stated scope.
   Old timestamps alone then do not prove missing work. Keep independent importer
   failures and unexplained staging/import mismatches separate from inactivity.
+
+## Generated Artifacts
+
+- Keep source, tests, examples and documentation in this repository. Save dated
+  reports, raw evidence, logs, approved worklogs and one-off investigation
+  scripts outside the checkout.
+- On this Windows collector, use
+  `C:/Users/Lukas/AppData/Local/T3CodeServer/data/worklog-review/reviews/<date-or-range>/`.
+  Pass absolute output paths to the canonical helpers and record them in the
+  checkpoint. Create the destination directory before launching collectors.
+- Preserve `config.json`, `.moco-sync-state.json`, installed `.t3-reader`
+  dependencies and scheduler checkpoints. The MOCO identity ledger prevents
+  duplicate entries; it is runtime state, not a disposable report.
+- For historical evidence moved out of the checkout, consult the archive
+  manifests in the persistent state directory before recollecting. Keep the
+  actual review visible in its original T3 thread.
 
 ## MOCO Time Entry Creation
 

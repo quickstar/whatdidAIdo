@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,27 @@ import t3_history
 
 
 class T3HistoryTests(unittest.TestCase):
+    def test_v2_messages_override_stale_legacy_projections_and_keep_provenance(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = self.database(root)
+            with closing(sqlite3.connect(path)) as c:
+                c.executescript('''
+                    CREATE TABLE orchestration_v2_projection_threads(thread_id TEXT, project_id TEXT, title TEXT, default_provider TEXT, payload_json TEXT);
+                    CREATE TABLE orchestration_v2_projection_messages(message_id TEXT, thread_id TEXT, run_id TEXT, role TEXT, created_at TEXT, updated_at TEXT, payload_json TEXT);
+                ''')
+                c.execute('INSERT INTO orchestration_v2_projection_threads VALUES(?,?,?,?,?)',
+                          ('v2','p','Current task','codex',json.dumps({'branch':'ITEM-3812','lineage':{'relationshipToParent':None}})))
+                c.execute('INSERT INTO orchestration_v2_projection_messages VALUES(?,?,?,?,?,?,?)',
+                          ('current','v2','run','user','2026-10-05T10:00:00Z','2026-10-05T10:00:00Z',json.dumps({'text':'Current human request','createdBy':'user','creationSource':'web'})))
+                c.commit()
+            result = self.collect([{'name':'local','database':str(path)}])
+            self.assertEqual(['Current task'], [x['title'] for x in result['chats']])
+            message = result['chats'][0]['messages'][0]
+            self.assertEqual('Current human request', message['text'])
+            self.assertEqual('user', message['created_by'])
+            self.assertEqual('web', message['creation_source'])
+            self.assertEqual('2026-10-05T10:00:00Z',result['sources'][0]['latest_message_at'])
+
     def database(self, root):
         path = Path(root) / 'state.sqlite'
         with closing(sqlite3.connect(path)) as c:
