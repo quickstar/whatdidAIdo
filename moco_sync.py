@@ -229,6 +229,7 @@ class MocoClient:
     def __init__(self, base_url, api_key):
         self.base_url = base_url.rstrip('/') + '/api/v1'
         self.api_key = api_key
+        self._current_user_id = None
 
     def request(self, method, path, body=None, query=None):
         url = self.base_url + path
@@ -251,8 +252,23 @@ class MocoClient:
             detail = error.read().decode('utf-8', errors='replace')
             raise RuntimeError(f'MOCO API {method} {path} failed with HTTP {error.code}: {detail}') from error
 
+    def current_user_id(self):
+        if self._current_user_id is None:
+            session = self.request('GET', '/session')
+            user_id = session.get('id') if isinstance(session, dict) else None
+            if not isinstance(user_id, int) or user_id <= 0:
+                raise RuntimeError('MOCO session did not identify the authenticated user.')
+            self._current_user_id = user_id
+        return self._current_user_id
+
     def activities(self, activity_date):
-        return self.request('GET', '/activities', query={'from': activity_date, 'to': activity_date}) or []
+        user_id = self.current_user_id()
+        records = self.request('GET', '/activities', query={
+            'from': activity_date, 'to': activity_date, 'user_id': user_id,
+        }) or []
+        if any((record.get('user') or {}).get('id') != user_id for record in records):
+            raise RuntimeError('MOCO returned activities outside the authenticated user scope.')
+        return records
 
     def create_activity(self, payload):
         return self.request('POST', '/activities', public_payload(payload))
@@ -552,14 +568,16 @@ def main():
     identity_state = load_identity_state(state_path)
     api_key = resolve_api_key()
     base_url = ((config.get('moco') or {}).get('base_url') or 'https://3volutions.mocoapp.com')
+    client = MocoClient(base_url, api_key)
     result = synchronize(
-        MocoClient(base_url, api_key),
+        client,
         worklog,
         config,
         args.apply,
         args.update_existing,
         identity_state,
     )
+    result['user_id'] = client.current_user_id()
     if args.apply or args.refresh_state:
         save_identity_state(state_path, identity_state)
         result['identity_state_saved'] = True

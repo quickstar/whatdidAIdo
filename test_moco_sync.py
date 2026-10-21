@@ -73,7 +73,67 @@ class FakeClient:
         return record
 
 
+class UserScopedApiClient(moco_sync.MocoClient):
+    """Model an admin API key whose unfiltered activity reads include coworkers."""
+
+    def __init__(self):
+        super().__init__('https://example.mocoapp.com', 'test-key')
+        self.records = [{
+            'id': 41,
+            'date': '2026-07-28',
+            'user': {'id': 2},
+            'project': {'id': 100},
+            'task': {'id': 200},
+            'seconds': 7200,
+            'description': 'Coworker work on the same Jira ticket',
+            'billable': False,
+            'tag': 'ROMSD-1',
+            'remote_id': 'ROMSD-1',
+            'remote_url': 'https://example.atlassian.net/browse/ROMSD-1',
+        }]
+        self.created = []
+
+    def request(self, method, path, body=None, query=None):
+        if method == 'GET' and path == '/session':
+            return {'id': 1}
+        if method == 'GET' and path == '/activities':
+            return [
+                record.copy() for record in self.records
+                if record['date'] == query['from']
+                and (not query.get('user_id') or record['user']['id'] == query['user_id'])
+            ]
+        if method == 'POST' and path == '/activities':
+            record = {**body, 'id': 42, 'user': {'id': 1}}
+            self.records.append(record)
+            self.created.append(record)
+            return record
+        raise AssertionError(f'Unexpected API mutation: {method} {path}')
+
+
 class MocoSyncTests(unittest.TestCase):
+    def test_coworker_same_ticket_cannot_suppress_or_replace_own_activity(self):
+        client = UserScopedApiClient()
+        coworker = client.records[0].copy()
+        first = moco_sync.synchronize(client, worklog(hours=1), CONFIG, apply=True)
+        self.assertEqual('created', first['results'][0]['action'])
+        self.assertEqual(1, client.created[0]['user']['id'])
+        second = moco_sync.synchronize(client, worklog(hours=1), CONFIG, apply=True)
+        self.assertEqual('unchanged', second['results'][0]['action'])
+        self.assertEqual(1, len(client.created))
+        self.assertEqual(coworker, client.records[0])
+
+    def test_unexpected_foreign_user_response_stops_before_writing(self):
+        class UnfilteredApiClient(UserScopedApiClient):
+            def request(self, method, path, body=None, query=None):
+                if method == 'GET' and path == '/activities':
+                    return self.records
+                return super().request(method, path, body, query)
+
+        client = UnfilteredApiClient()
+        with self.assertRaisesRegex(RuntimeError, 'outside the authenticated user scope'):
+            moco_sync.synchronize(client, worklog(hours=1), CONFIG, apply=True)
+        self.assertEqual([], client.created)
+
     def test_explicit_date_move_keeps_id_and_does_not_touch_same_ticket(self):
         client = FakeClient()
         first = moco_sync.synchronize(client, worklog(hours=1), CONFIG, apply=True)
