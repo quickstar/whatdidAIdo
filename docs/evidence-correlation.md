@@ -84,8 +84,10 @@ not establish a duration. Establish their task attribution before considering
 whether they justify extending desktop interaction.
 
 **Done:** Every relevant human exchange is assigned to a task or explicitly
-marked unresolved/excluded with a reason. Every task has a disposition in the
-ledger below, including tasks with evidence but no supportable duration.
+marked unresolved/excluded with a reason. Each task separately accounts for
+its evidenced research, reading, review, decision, handover and coordination
+phases, including phases with unknown duration. A task's existing time row
+does not establish that its remaining phases have been reviewed.
 
 ## 3. Reconcile GitHub and local git with those tasks
 
@@ -146,9 +148,19 @@ Ticket-specific implementation retains its own ticket attribution. Explain
 omitted short tasks rather than silently combining unrelated work to reach
 the MOCO minimum.
 
+Subtract accepted intervals from the combined ActivityWatch interaction union
+and inspect the remaining blocks against the chronological exchanges and raw
+evidence from each contributing source. Join related technical fragments into
+supported attended sessions across app and device changes. Record the remaining
+work-like blocks as attributed, already accounted for, personal or unresolved,
+with reasons; keep unsupported attendance unquantified. A browser watcher can
+retain a tab while another app or device is used: establish foreground context
+before using that tab to exclude an otherwise evidenced human work phase.
+
 **Done:** Accepted intervals are nonoverlapping across tasks, every extension
 has recorded evidence and confidence, and unrounded and rounded totals are
-available. Explain material rounding sensitivity and unsupported durations.
+available. Remaining work-like interaction blocks have explicit dispositions.
+Explain material rounding sensitivity and unsupported durations.
 
 ## 5. Save the attribution ledger and complete the review
 
@@ -167,12 +179,18 @@ Record:
 - **Result:** proposed total, approved total if any, and separately the verified
   MOCO total and receipt path after authorized synchronization.
 
-Before presenting the worklog, verify that the ledger covers the human
-exchanges and git outcomes above, every row maps to one MOCO activity, and the
-table matches its rounded total. Show useful evidence-only findings and source
-gaps after the table, even when they cannot receive hours. Label a partial
-estimate as partial; a complete evidence search can still leave attendance
-duration uncertain.
+### First-pass completion gate
+
+Before the **first summary for every fresh date**, complete all checks above:
+source coverage, human work phases, logical git outcomes, remaining interaction
+blocks and the global interval union. Verify that every row maps to one MOCO
+activity and the table matches its rounded total. Apply this gate to revisions
+as well. A partial estimate still requires completing every check possible with
+the available evidence before presentation.
+
+Show useful evidence-only findings and source gaps after the table, even when
+they cannot receive hours. Label a partial estimate as partial; a complete
+evidence search can still leave attendance duration uncertain.
 
 When a user challenges a total, compare the ledgers and identify the missing
 task, omitted phase, new evidence or corrected assumption. Preserve the prior

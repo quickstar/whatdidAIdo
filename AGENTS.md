@@ -22,7 +22,8 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 1. Read `config.json` first to understand clients, contacts, ticket prefixes, project mappings, known tickets, personal filters, and context hints.
    For every first or revised worklog, read
    [Evidence correlation](docs/evidence-correlation.md) before attribution.
-   Complete its coverage and attribution checks before presenting a total.
+   Complete its **first-pass completion gate** for every fresh date before
+   presenting the first table or total; apply the same gate to revisions.
 2. Before interpreting every new or revised worklog, refresh the locally saved
    evidence from all configured T3 environments with the primary script:
 
@@ -71,7 +72,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    Raw ticket detections, `not-afk` totals, GitHub event spans, and commit counts
    are signals, not final work duration or billability.
    Save the attribution ledger with the dated evidence: account for every
-   relevant human exchange and logical git outcome, including work outside
+   evidenced human work phase and logical git outcome, including work outside
    desktop interaction and work whose duration remains unknown.
 8. Return the final worklog as a markdown table with clickable Jira links.
 9. Before presenting the table, ensure every row is directly serializable to
