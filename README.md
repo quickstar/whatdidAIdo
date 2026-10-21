@@ -317,10 +317,22 @@ snapshots, not an atomic transaction across servers.
 
 ### Freshness gate and recovery
 
-Run the canonical `python worklog.py <date> --ai --output <absolute-path>.json`
-for a new review. The configured live adapter runs automatically; neither the
-desktop UI nor selecting/opening remote threads is required. It refreshes the
-saved evidence, not T3's private IndexedDB or server database.
+Before interpreting every new or revised worklog, run the canonical
+`python worklog.py <date> --ai --output <absolute-path>.json` to refresh locally
+saved evidence across all configured T3 environments. Assume distributed work
+on multiple computers and T3 mobile as required by `AGENTS.md`. An earlier
+review's coverage assessment does not replace this refresh, especially after
+source recovery.
+
+The configured live adapter runs automatically: read the live local database,
+fetch current active and archived remote inventories, and acquire all
+date-relevant full histories before attribution. Verify every environment
+below; local readability alone does not establish cross-server coverage. This
+updates the collector's local evidence, not T3's private IndexedDB or server
+database. There is no assumed central transcript replication or invented T3
+sync command, and opening the desktop or selecting threads is unnecessary.
+Resuming the same acquisition reuses valid completed stages. A MOCO-only write
+uses the approved table without refreshing or re-estimating its activities.
 
 Before using saved evidence, check its `date`, `timezone`, `collected_at`,
 `t3_history.warnings`, and every `t3_history.sources` entry:
@@ -341,7 +353,8 @@ Before using saved evidence, check its `date`, `timezone`, `collected_at`,
   not prove that its transcript was collected. Cache-only, unresolved paginated,
   archive-unverified and failed sources remain partial.
 
-Resume valid completed stages from saved JSON and checkpoint paths. For a
+Within the current acquisition, resume valid completed stages from saved JSON
+and checkpoint paths. For a
 reported gap, inspect only configuration, reader dependencies, Windows pairing
 access and the affected server's reachability. Apply the scheduled workflow's
 one transient retry limit, retaining stdout/stderr, exit status and retry count.

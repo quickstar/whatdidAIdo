@@ -12,12 +12,19 @@ external review directory. Follow their output paths and archive manifests;
 an older review can have been superseded by a nested re-evaluation. Keep the
 approved total separate from a new estimate until the user approves a change.
 
+Apply the mandatory cross-server refresh in the
+[T3 freshness gate](../README.md#freshness-gate-and-recovery) before attribution
+for each new or revised review. Saved reviews locate prior evidence and expose
+changes; they do not replace current acquisition. Preserve the approved table
+unchanged when the request is only to synchronize it to MOCO.
+
 Inspect the full saved collector JSON and GitHub audit, rather than relying
 on `--ai` excerpts or the previous table. Extract messages and outcomes in
 bounded batches while keeping the full exports on disk; exclude reasoning
-and tool payloads from the human-work review. Resume valid completed
-acquisition stages. Collect or recover only missing or invalid evidence under
-the existing retry rules.
+and tool payloads from the human-work review. Within the current acquisition,
+resume valid completed stages and recover missing or invalid evidence under
+the existing retry rules. Reuse successful GitHub discovery across reviews;
+refresh distributed T3 evidence for each new or revised review as above.
 
 For each configured T3 environment, record the source identity, acquisition
 time, requested-day messages, freshness result and unresolved gaps. Check all
@@ -55,11 +62,13 @@ work evidence even while every desktop watcher reports AFK. Desktop interaction
 is therefore neither a ceiling on attended work nor a prerequisite for using
 a chat-supported session.
 
-The user has confirmed using T3 mobile and threads on different hosts. Treat
-mobile participation as a normal possibility on future dates. Preserve a
-date-specific confirmation with its scope; it establishes neither attendance
-through every silent gap nor the physical device behind each message. Keep
-server provenance explicit, such as `T3 Orion server (client unknown)`.
+Apply the distributed-work default in `AGENTS.md`: assume multiple computers
+and T3 mobile on every workday without asking the user to confirm device use or
+approximate hours. Inspect cross-host human participation even during desktop
+gaps. This default establishes neither attendance through every silent gap nor
+the physical device behind each message. Preserve scoped inactivity exceptions
+and keep server provenance explicit, such as
+`T3 Orion server (client unknown)`.
 
 For every task, inspect these exchanges as candidate work:
 

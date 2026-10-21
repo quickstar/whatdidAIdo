@@ -23,7 +23,8 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    For every first or revised worklog, read
    [Evidence correlation](docs/evidence-correlation.md) before attribution.
    Complete its coverage and attribution checks before presenting a total.
-2. Run the primary script for the requested date:
+2. Before interpreting every new or revised worklog, refresh the locally saved
+   evidence from all configured T3 environments with the primary script:
 
    ```bash
    python worklog.py <date> --ai --output <evidence-dir>/worklog-<date>.json
@@ -41,6 +42,9 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    On this Windows machine, use `python`, not `python3`.
    Inspect `chat_source`, source coverage, and warnings in the saved evidence.
    Follow **Chat evidence collection** below before interpreting chat activity.
+   A previous review is context, not a substitute for this refresh. Resuming
+   the same acquisition may reuse its completed stages. Writing an already
+   approved table to MOCO preserves that table and needs no new estimate.
 
 3. Run the deterministic GitHub and local-git audit:
 
@@ -78,6 +82,11 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 ## Chat Evidence Collection
 
+- Assume distributed work across multiple computers and T3 mobile on every
+  workday. Collect all configured environments and correlate tasks across
+  devices before estimating time; device-use or approximate-hours questions
+  are not a prerequisite. Keep unknown physical clients explicit, and validate
+  attendance rather than treating every silent gap as worked time.
 - Before T3 collection, CLI troubleshooting, or cache-gap recovery, read
   [T3 Code conversation evidence](README.md#t3-code-conversation-evidence),
   including its freshness gate and CLI guidance.
@@ -86,10 +95,11 @@ When the user asks questions such as "what did I do today?", "what did I do yest
   One run selects exactly one chat source. `--chat-source codex` is an explicit
   alternative for direct Codex app/CLI work or pre-T3 dates; it skips T3 entirely.
   `--chat-source none` skips both. A T3 coverage warning does not switch sources.
-- Read each canonical evidence file before collecting again. Resume completed
-  stages from saved outputs. Rerun an affected helper only after source recovery,
-  an implementation fix, or the defined transient retry. Read-only inspection of
-  a reported gap is allowed; repeating successful discovery is unnecessary.
+- Inspect saved evidence and checkpoints first, then perform the required
+  cross-server refresh for a new or revised review. Within that acquisition,
+  resume completed stages; rerun an affected helper only after source recovery,
+  an implementation fix, or the defined transient retry. Reuse successful
+  GitHub discovery and inspect only its reported gaps.
 - The T3 collector reads each unique configured server database once and scans
   the desktop cache once per invocation. A readable server database takes
   precedence over its cached conversation bodies. Aliased database paths reuse
