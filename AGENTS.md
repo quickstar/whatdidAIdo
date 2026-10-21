@@ -20,6 +20,9 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 ## Required Workflow
 
 1. Read `config.json` first to understand clients, contacts, ticket prefixes, project mappings, known tickets, personal filters, and context hints.
+   For every first or revised worklog, read
+   [Evidence correlation](docs/evidence-correlation.md) before attribution.
+   Complete its coverage and attribution checks before presenting a total.
 2. Run the primary script for the requested date:
 
    ```bash
@@ -63,6 +66,9 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 7. Interpret all evidence together using the deterministic session rules below.
    Raw ticket detections, `not-afk` totals, GitHub event spans, and commit counts
    are signals, not final work duration or billability.
+   Save the attribution ledger with the dated evidence: account for every
+   relevant human exchange and logical git outcome, including work outside
+   desktop interaction and work whose duration remains unknown.
 8. Return the final worklog as a markdown table with clickable Jira links.
 9. Before presenting the table, ensure every row is directly serializable to
    one MOCO activity: one customer, one project/task, one billability
@@ -296,7 +302,7 @@ General rules:
 2. Split a candidate session when there is more than 60 minutes with no
    supporting foreground, human chat interaction, git, review, or supplied-calendar evidence.
    Do not bridge the gap merely because an application remained open.
-3. A chat-supported session may extend the interval only when it has one dominant ticket and
+3. A chat-supported session may extend the interval only when it has one dominant task (a ticket when applicable) and
    does not overlap unrelated user work. Split its internal turns using the same
    60-minute unsupported-gap rule; never count background waiting or overlapping
    tasks twice.

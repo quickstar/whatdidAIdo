@@ -172,6 +172,14 @@ A ticket might show 20 minutes of raw browser time while a coherent foreground,
 chat, and commit sequence supports a longer development session. An application
 merely remaining open is never enough to count the intervening gap.
 
+### Correlate evidence before estimating
+
+Follow [Evidence correlation](docs/evidence-correlation.md) for every initial
+worklog and re-evaluation. It covers mobile T3 participation, task handovers
+across threads and hosts, reading and review decisions, superseded commits,
+and the attribution checks required before presenting a total. Save its
+attribution ledger beside the dated collector outputs.
+
 ### One chat source per run
 
 With T3 configured, the default collects T3 only: it does not open the Codex state database or scan rollout files. T3 already includes conversations using the Codex provider. A T3 read failure remains a coverage warning, rather than silently triggering another history scan. `--chat-source` overrides configuration; `auto` preserves native Codex behavior for installations without T3 configuration. The older `--no-codex` and `--no-t3` flags only disable the selected source; they do not switch to the other one.
