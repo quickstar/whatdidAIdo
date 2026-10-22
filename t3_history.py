@@ -117,8 +117,10 @@ def collect(sources, start, end, client_cache=None, live_http=None):
             import t3_live
             live_catalog = t3_live.desktop_catalog(live_http)
         except Exception as exc:
+            # t3_live raises RuntimeError with fixed, credential-free messages.
+            detail = f'{type(exc).__name__}: {exc}' if isinstance(exc, RuntimeError) else type(exc).__name__
             result['warnings'].append(
-                f'T3 live authentication unavailable ({type(exc).__name__}); using saved evidence')
+                f'T3 live authentication unavailable ({detail}); using saved evidence')
         result['live_evidence'] = {}
     for source in sources:
         name = source['name']

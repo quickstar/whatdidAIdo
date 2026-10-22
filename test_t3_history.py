@@ -92,6 +92,19 @@ class T3HistoryTests(unittest.TestCase):
         self.assertEqual('unavailable', result['sources'][0]['status'])
         self.assertTrue(result['warnings'])
 
+    def test_live_unlock_failure_reports_its_reason_but_not_other_exception_text(self):
+        unlock = RuntimeError('Windows could not unlock the existing T3 pairing (error 0x8009000B)')
+        with patch('t3_live.desktop_catalog', side_effect=unlock):
+            result = t3_history.collect([], datetime(2026, 10, 5, tzinfo=timezone.utc),
+                                        datetime(2026, 10, 6, tzinfo=timezone.utc),
+                                        live_http={'enabled': True})
+        self.assertIn('RuntimeError: Windows could not unlock', result['warnings'][0])
+        with patch('t3_live.desktop_catalog', side_effect=ValueError('secret-ish detail')):
+            result = t3_history.collect([], datetime(2026, 10, 5, tzinfo=timezone.utc),
+                                        datetime(2026, 10, 6, tzinfo=timezone.utc),
+                                        live_http={'enabled': True})
+        self.assertNotIn('secret-ish', result['warnings'][0])
+
     def test_midnight_and_updated_old_messages_are_handled(self):
         with tempfile.TemporaryDirectory() as root:
             path = self.database(root)

@@ -369,6 +369,22 @@ host/server must run, remote servers must be reachable, and the scheduled
 Windows account must be able to unlock the saved pairing. Keep tokens in memory;
 never print or persist credentials in evidence or diagnostics.
 
+`T3 live authentication unavailable (RuntimeError: Windows could not unlock the
+existing T3 pairing ...)` concerns the collector's process context. It runs
+inside the T3 server process, which the `T3 Code Server` Windows task starts.
+With logon type S4U (Task Scheduler's "Do not store password"), that logon has
+no user DPAPI credentials. Unlocking then depends on a cached key and is
+intermittent: on 22 October 2026 it failed at 06:02 and 07:37 and succeeded at
+07:52 in the same process. Since then the task stores the password (logon type
+`Password`). If the warning returns, check that the task was not reset to S4U
+and re-enter the password after a Windows password change; meanwhile treat it
+as transient and rerun the helper once later. T3's app-owned thread tools reach
+only the local server environment and do not replace the remote read.
+
+A cached thread absent from a verified live active and archived inventory was
+deleted on its server after caching. Keep its cached requested-day messages as
+evidence with cache provenance.
+
 ### T3 tools and CLI
 
 Use T3's app-owned thread and scheduler tools for conversation/schedule actions;

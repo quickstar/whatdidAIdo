@@ -23,13 +23,17 @@ def unprotect_windows(data):
 
     buffer = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
     source, output = Blob(len(data), buffer), Blob()
-    decrypt = ctypes.windll.crypt32.CryptUnprotectData
+    decrypt = ctypes.WinDLL('crypt32', use_last_error=True).CryptUnprotectData
     decrypt.argtypes = [ctypes.POINTER(Blob), ctypes.c_void_p, ctypes.c_void_p,
                         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong,
                         ctypes.POINTER(Blob)]
     decrypt.restype = ctypes.c_int
     if not decrypt(ctypes.byref(source), None, None, None, None, 1, ctypes.byref(output)):
-        raise RuntimeError('Windows could not unlock the existing T3 pairing')
+        # An S4U ("do not store password") logon has no user DPAPI credentials;
+        # unlocking then depends on a cached master key and fails intermittently.
+        raise RuntimeError('Windows could not unlock the existing T3 pairing '
+                           f'(error 0x{ctypes.get_last_error() & 0xFFFFFFFF:08X}; '
+                           'check the server task logon type)')
     try:
         return ctypes.string_at(output.data, output.size)
     finally:
