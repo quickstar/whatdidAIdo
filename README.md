@@ -216,16 +216,44 @@ for auditability. Add the canonical names to `activitywatch.expected_sources`
 to warn when a participating machine is entirely absent. The health command
 also reports per-source bucket coverage and the latest API-visible timestamp.
 
-Pull-only `aw-sync` still initializes an empty staging database for the central
-server's device ID. It remains at zero buckets/events because local data is not
-pushed, but deleting it is ineffective: the next pull pass recreates it. Keep
-the small empty database and judge freshness from satellite staging files and
-the imported API buckets, not the central staging file timestamp.
+Each recording machine needs one local working database. OneDrive distributes
+the staging databases written by `aw-sync`; do not place the live server SQLite
+database in OneDrive. A collector which also records its own activity must
+publish that activity as well as import peers: use `aw-sync --sync-dir <path>
+sync --mode both`. Satellites can publish with `--mode push` when they do not
+need a combined view. The background daemon's default can be push-only, so
+specify the mode explicitly. Check the installed `--help` after upgrades.
 
-For a central collector, run `aw-sync --sync-dir <path> daemon --mode pull` only
-on the central machine and `aw-sync --sync-dir <path> daemon --mode push` on
-satellites. (`--sync-dir` is a global option and must precede `daemon`.) Do not use the default
-bidirectional daemon for this topology.
+### Standard desktop setup
+
+Use the official Tauri distribution with its embedded Rust server and the
+default working-data directory (`%LOCALAPPDATA%/activitywatch/aw-server-rust`
+on Windows). Keep verified one-time recovery backups outside active directories.
+No directory junction, custom database path, launcher or supervisor is needed.
+
+The chezmoi repository manages platform-native `aw-tauri/config.toml` files.
+Autostart the bundled Rust `aw-sync` module with native `module_args` specifying
+the absolute OneDrive `ActivityWatchSync` directory and `daemon --mode both` on
+Andromeda (`--mode push` on satellites). Linux uses Rust `aw-awatcher`; Windows
+and macOS retain the official bundled Python AFK/window watchers. Tauri already
+embeds the server: do not start another server module or a separate sync task.
+
+Configure native login startup as well as the TOML file: v0.14.1 considers the
+OS authoritative once a config exists. The managed setup uses Tauri's native
+Run value on Windows, Login Item on macOS, and XDG entry on Linux. Retire the
+classic Qt startup only once Tauri is installed. The old `ActivityWatch Sync`
+scheduled task is intentionally absent in this setup.
+
+The v0.14.1 Tauri bundle can report `v0.14.0 (rust)` through the API because its
+embedded server crate retains that version. Verify the actual app package,
+active data directory, identity and evidence; that API label alone does not
+establish a downgrade or a directory switch.
+
+Verify the native `aw-sync status` diagnostics, the latest native sync report,
+and requested-day AFK/window events in the API. Process presence or exit status
+alone does not establish coverage. Historical recovery and a fresh satellite
+feed are separate checks: compare peer staging timestamps with imported events,
+and do not assume a sleeping device should have new data.
 
 It resolves the Codex data directory separately in this order:
 
