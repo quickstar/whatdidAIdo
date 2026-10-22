@@ -244,6 +244,12 @@ Run value on Windows, Login Item on macOS, and XDG entry on Linux. Retire the
 classic Qt startup only once Tauri is installed. The old `ActivityWatch Sync`
 scheduled task is intentionally absent in this setup.
 
+A running server says nothing about the next sign-in. On Windows,
+`--activitywatch-health` therefore also warns, before contacting the API, when
+the current user has no enabled Run value for an installed `aw-tauri.exe` or
+`aw-qt.exe`. On 22 October 2026 that value disappeared unnoticed and Andromeda
+stopped recording after a restart. Restore it through the chezmoi script.
+
 The v0.14.1 Tauri bundle can report `v0.14.0 (rust)` through the API because its
 embedded server crate retains that version. Verify the actual app package,
 active data directory, identity and evidence; that API label alone does not

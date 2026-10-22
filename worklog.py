@@ -801,6 +801,64 @@ def activitywatch_health(client):
     }
 
 
+WINDOWS_RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+WINDOWS_STARTUP_APPROVED_RUN_KEY = (
+    r'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+)
+ACTIVITYWATCH_LAUNCHERS = ('aw-tauri.exe', 'aw-qt.exe')
+
+
+def read_windows_user_values(key_path):
+    """Return the current user's values under one registry key, or {} when it is absent."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            values = {}
+            for index in range(winreg.QueryInfoKey(key)[1]):
+                name, data, _ = winreg.EnumValue(key, index)
+                values[name] = data
+            return values
+    except FileNotFoundError:
+        return {}
+
+
+def activitywatch_login_warnings(read_values=None):
+    """Warn when this Windows user will not start ActivityWatch at the next sign-in.
+
+    A running server proves nothing about the next sign-in; a removed Run value
+    only shows up as missing data after a restart.
+    """
+    if read_values is None:
+        if os.name != 'nt':
+            return []
+        read_values = read_windows_user_values
+    approved = read_values(WINDOWS_STARTUP_APPROVED_RUN_KEY)
+    problems = []
+    for name, command in read_values(WINDOWS_RUN_KEY).items():
+        if not isinstance(command, str):
+            continue
+        if not any(launcher in command.lower() for launcher in ACTIVITYWATCH_LAUNCHERS):
+            continue
+        command = command.strip()
+        if command.startswith('"'):
+            program = command[1:].split('"', 1)[0]
+        else:
+            program = command[:command.lower().index('.exe') + 4]
+        state = approved.get(name)
+        # Startup apps marks a disabled entry with an odd first byte.
+        if isinstance(state, bytes) and state and state[0] & 1:
+            problems.append(f"ActivityWatch login entry '{name}' is disabled in Startup apps")
+        elif not Path(program).is_file():
+            problems.append(f"ActivityWatch login entry '{name}' points to a missing program: {program}")
+        else:
+            return []
+    return problems or [
+        'ActivityWatch is not registered to start at sign-in for this Windows user '
+        f'(no aw-tauri.exe or aw-qt.exe value under HKCU\\{WINDOWS_RUN_KEY}); '
+        'it stops recording after the next sign-in until started manually'
+    ]
+
+
 def print_activitywatch_health(health):
     """Print compact central-server discovery diagnostics."""
     info = health['info']
@@ -1812,6 +1870,9 @@ Examples:
         )
         client = ActivityWatchRESTClient(aw_host, aw_port, aw_timeout)
         if args.activitywatch_health:
+            # Local and independent of the server, so report it even when the API is down.
+            for warning in activitywatch_login_warnings():
+                print(f"Warning: {warning}")
             print_activitywatch_health(activitywatch_health(client))
             return
     except ActivityWatchAPIError as exc:

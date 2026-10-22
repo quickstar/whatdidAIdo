@@ -483,5 +483,38 @@ class CodexHistoryTests(unittest.TestCase):
         self.assertEqual(['qualified'], evidence['evidence_union_codex_task_ids'])
 
 
+class ActivityWatchLoginTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.launcher = Path(self.directory.name) / 'aw-tauri.exe'
+        self.launcher.write_bytes(b'')
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def warnings(self, run, approved=None):
+        values = {worklog.WINDOWS_RUN_KEY: run,
+                  worklog.WINDOWS_STARTUP_APPROVED_RUN_KEY: approved or {}}
+        return worklog.activitywatch_login_warnings(lambda key: values[key])
+
+    def test_enabled_entry_for_an_installed_launcher_is_quiet(self):
+        run = {'OneDrive': 'OneDrive.exe /background', 'aw-tauri': f'"{self.launcher}"'}
+        self.assertEqual([], self.warnings(run, {'aw-tauri': b'\x02' + bytes(11)}))
+
+    def test_missing_entry_warns_that_recording_stops_after_sign_in(self):
+        [warning] = self.warnings({'OneDrive': 'OneDrive.exe /background'})
+        self.assertIn('not registered to start at sign-in', warning)
+
+    def test_entry_disabled_in_startup_apps_warns(self):
+        [warning] = self.warnings({'aw-tauri': f'"{self.launcher}"'}, {'aw-tauri': b'\x03' + bytes(11)})
+        self.assertIn("'aw-tauri' is disabled", warning)
+
+    def test_entry_for_a_removed_program_warns(self):
+        missing = Path(self.directory.name) / 'old' / 'aw-qt.exe'
+        [warning] = self.warnings({'ActivityWatch': f'{missing} --no-gui'})
+        self.assertIn('missing program', warning)
+        self.assertIn(str(missing), warning)
+
+
 if __name__ == '__main__':
     unittest.main()
