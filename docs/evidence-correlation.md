@@ -11,6 +11,9 @@ Find the latest dated checkpoint, approved worklog and MOCO receipt in the
 external review directory. Follow their output paths and archive manifests;
 an older review can have been superseded by a nested re-evaluation. Keep the
 approved total separate from a new estimate until the user approves a change.
+Read the user's messages in each earlier review thread for the date (the
+checkpoint `task_id` names it); corrections and preferences stated there bind
+the revision.
 
 Apply the mandatory cross-server refresh in the
 [T3 freshness gate](../README.md#freshness-gate-and-recovery) before attribution
@@ -53,6 +56,12 @@ metadata are hints; a misleading title must not override the conversation.
 Keep a task together across hosts and devices. Split its customer, project,
 billability or ticket attribution according to `AGENTS.md`, rather than making
 one row per thread, provider or machine.
+
+When customer or billability is unclear, consult approved worklogs of the same
+work type in the review state directory before holding the work. Fleet-wide
+release merges and multi-customer version rollouts were approved as
+`Internal Rooms` / Entwicklung, non-billable. A customer-specific deployment
+still needs its own evidence under `AGENTS.md`.
 
 ### Mobile participation and desktop gaps
 
@@ -151,7 +160,9 @@ the MOCO minimum.
 Subtract accepted intervals from the combined ActivityWatch interaction union
 and inspect the remaining blocks against the chronological exchanges and raw
 evidence from each contributing source. Join related technical fragments into
-supported attended sessions across app and device changes. Record the remaining
+supported attended sessions across app and device changes. Match every
+remaining T3 Code or terminal block against requested-day human prompts on all
+servers, cache-only sources included, before calling it unresolved. Record the remaining
 work-like blocks as attributed, already accounted for, personal or unresolved,
 with reasons; keep unsupported attendance unquantified. A browser watcher can
 retain a tab while another app or device is used: establish foreground context

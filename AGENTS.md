@@ -131,9 +131,10 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 ## Generated Artifacts
 
-- Keep source, tests, examples and documentation in this repository. Save dated
-  reports, raw evidence, logs, approved worklogs and one-off investigation
-  scripts outside the checkout.
+- Keep source, tests, examples and documentation in this repository. Save raw
+  evidence, logs, attribution ledgers, approved worklogs and one-off
+  investigation scripts outside the checkout. The review itself lives only in
+  its T3 thread; write no separate Markdown review or report file.
 - On this Windows collector, use
   `C:/Users/Lukas/AppData/Local/T3CodeServer/data/worklog-review/reviews/<date-or-range>/`.
   Pass absolute output paths to the canonical helpers and record them in the
@@ -417,12 +418,15 @@ explicitly:
 Table format:
 
 ```markdown
-| Cat | Client/Ticket | Source | Description | Time |
-|-----|---------------|--------|-------------|------|
-| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Andromeda + MacBook Pro | Feature description | 4.5h |
-| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | MacBook Pro | Issue description | 30m |
-| Mtg | Client (Contact) | Andromeda | Meeting topic | 1h |
+| Cat | Client/Ticket | Source | Description | Billable | Time |
+|-----|---------------|--------|-------------|----------|------|
+| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Andromeda + MacBook Pro | Feature description | Yes | 4.5h |
+| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | MacBook Pro | Issue description | No | 30m |
+| Mtg | Client (Contact) | Andromeda | Meeting topic | No | 1h |
 ```
+
+Directly below the table, name each row's MOCO project and task so the user
+approves the exact activity mapping.
 
 Every worklog row must contain a `Source` value. Use the friendly labels
 `Andromeda` and `MacBook Pro` for the configured ActivityWatch sources

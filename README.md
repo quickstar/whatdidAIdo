@@ -409,8 +409,9 @@ subcommands or flags are stable.
 
 ## Generated files and local state
 
-Save reports, raw collector JSON, helper logs, approved worklogs and temporary
-analysis scripts outside the checkout. On this collector, use
+Save raw collector JSON, helper logs, attribution ledgers, approved worklogs and
+temporary analysis scripts outside the checkout; the review text lives in its T3
+thread. On this collector, use
 `C:/Users/Lukas/AppData/Local/T3CodeServer/data/worklog-review/reviews/<date-or-range>/`
 and pass absolute paths to `--output`. Keep historical evidence and MOCO
 receipts so interrupted runs can resume and delivered dates are not duplicated.
