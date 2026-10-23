@@ -18,11 +18,11 @@ the revision.
 Apply the mandatory cross-server refresh in the
 [T3 freshness gate](../README.md#freshness-gate-and-recovery) before attribution
 for each new or revised review. Saved reviews locate prior evidence and expose
-changes; they do not replace current acquisition. Preserve the approved table
+changes; they do not replace current acquisition. Preserve the approved worklog
 unchanged when the request is only to synchronize it to MOCO.
 
 Inspect the full saved collector JSON and GitHub audit, rather than relying
-on `--ai` excerpts or the previous table. Extract messages and outcomes in
+on `--ai` excerpts or the previous worklog. Extract messages and outcomes in
 bounded batches while keeping the full exports on disk; exclude reasoning
 and tool payloads from the human-work review. Within the current acquisition,
 resume valid completed stages and recover missing or invalid evidence under
@@ -195,13 +195,15 @@ Record:
 Before the **first summary for every fresh date**, complete all checks above:
 source coverage, human work phases, logical git outcomes, remaining interaction
 blocks and the global interval union. Verify that every row maps to one MOCO
-activity and the table matches its rounded total. Apply this gate to revisions
+activity and the presented worklog matches its rounded total. Apply this gate to revisions
 as well. A partial estimate still requires completing every check possible with
 the available evidence before presentation.
 
-Show useful evidence-only findings and source gaps after the table, even when
-they cannot receive hours. Label a partial estimate as partial; a complete
-evidence search can still leave attendance duration uncertain.
+Follow [AGENTS.md Output Format](../AGENTS.md#output-format): retain useful
+evidence-only findings and source gaps in the ledger and summarize material
+unresolved gaps in one sentence after the compact worklog. Label a partial
+estimate as partial; a complete evidence search can still leave attendance
+duration uncertain. Expand supporting detail when the user asks.
 
 When a user challenges a total, compare the ledgers and identify the missing
 task, omitted phase, new evidence or corrected assumption. Preserve the prior

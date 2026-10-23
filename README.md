@@ -2,7 +2,7 @@
 
 > You know what you did. Your AI does too.
 
-An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.net/). Open an AI coding agent such as Codex or Claude Code in the repo, ask *"what did I do yesterday?"*, and get a clean worklog table — no manual time tracking needed.
+An AI-powered worklog generator built on [ActivityWatch](https://activitywatch.net/). Open an AI coding agent such as Codex or Claude Code in the repo, ask *"what did I do yesterday?"*, and get a compact worklog grouped by MOCO project — no manual time tracking needed.
 
 ## How it works
 
@@ -72,7 +72,7 @@ Open your AI coding agent in the repo directory and just ask:
 > What did I work on on 24.02.2026?
 ```
 
-Agents should read `AGENTS.md`. Claude Code can use `CLAUDE.md`, which imports the same shared instructions. The agent runs the script, interprets the raw data, and outputs a formatted worklog table.
+Agents should read `AGENTS.md`. Claude Code can use `CLAUDE.md`, which imports the same shared instructions. The agent runs the script, interprets the raw data, and outputs a compact worklog grouped by MOCO project.
 
 You can also run the script directly:
 
@@ -141,21 +141,24 @@ See [`config.example.json`](config.example.json) for a full template.
 
 The `--ai` flag produces a compact summary that an AI can interpret into a worklog like this:
 
-**Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h (Andromeda 2.1h; MacBook Pro 0.9h; 0.3h overlap) | GitHub activity through 21:27**
+**28 July — estimated total: ~1h15m**
 
-| Cat | Client/Ticket | Source | Description | Time |
-|-----|---------------|--------|-------------|------|
-| Dev | PROJ-1234 | Andromeda + MacBook Pro | Implement user authentication flow | 4.5h |
-| Bug | BUG-5678 | MacBook Pro | Fix session timeout on login page | 45m |
-| Mtg | Acme (Jane Doe) | Andromeda | Sprint planning | 1h |
-| Review | PR #42 | GitHub (device unknown) | Review payment integration | 30m |
-| Admin | — | Andromeda | Email, ticket triage | 30m |
+**W&S 2026 – Acme · Entwicklung**
 
-Every interpreted worklog includes the evidence source. Activity recorded for
-the same task on multiple devices remains one task row with all contributing
-sources; overlapping intervals are unioned rather than added. Evidence such as
-a GitHub event that cannot prove the physical device is labeled as unknown
-instead of being assigned to a machine by assumption.
+- Fix session timeout · [BUG-5678](https://3volutions.atlassian.net/browse/BUG-5678) — **45m**
+
+**INTERN-Admin-2026 · Admin**
+
+- Email and ticket triage — **30m**
+
+Both activities are non-billable.
+
+The project names above are illustrative; real reviews use verified MOCO
+mappings. [AGENTS.md Output Format](AGENTS.md#output-format) defines the
+presentation contract, including a short visible warning for partial reviews.
+Evidence sources, per-device totals, confidence, coverage diagnostics and git
+audit details remain in the attribution ledger. Work on multiple devices is
+unioned, and unknown physical clients remain explicit in that evidence.
 
 ## How AI time estimation works
 
@@ -366,7 +369,7 @@ updates the collector's local evidence, not T3's private IndexedDB or server
 database. There is no assumed central transcript replication or invented T3
 sync command, and opening the desktop or selecting threads is unnecessary.
 Resuming the same acquisition reuses valid completed stages. A MOCO-only write
-uses the approved table without refreshing or re-estimating its activities.
+uses the approved worklog without refreshing or re-estimating its activities.
 
 Before using saved evidence, check its `date`, `timezone`, `collected_at`,
 `t3_history.warnings`, and every `t3_history.sources` entry:

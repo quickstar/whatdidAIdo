@@ -23,7 +23,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    For every first or revised worklog, read
    [Evidence correlation](docs/evidence-correlation.md) before attribution.
    Complete its **first-pass completion gate** for every fresh date before
-   presenting the first table or total; apply the same gate to revisions.
+   presenting the first worklog or total; apply the same gate to revisions.
 2. Before interpreting every new or revised worklog, refresh the locally saved
    evidence from all configured T3 environments with the primary script:
 
@@ -45,7 +45,7 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    Follow **Chat evidence collection** below before interpreting chat activity.
    A previous review is context, not a substitute for this refresh. Resuming
    the same acquisition may reuse its completed stages. Writing an already
-   approved table to MOCO preserves that table and needs no new estimate.
+   approved worklog to MOCO preserves those activities and needs no new estimate.
 
 3. Run the deterministic GitHub and local-git audit:
 
@@ -74,8 +74,8 @@ When the user asks questions such as "what did I do today?", "what did I do yest
    Save the attribution ledger with the dated evidence: account for every
    evidenced human work phase and logical git outcome, including work outside
    desktop interaction and work whose duration remains unknown.
-8. Return the final worklog as a markdown table with clickable Jira links.
-9. Before presenting the table, ensure every row is directly serializable to
+8. Return the compact worklog described in **Output Format**, with clickable Jira links.
+9. Before presenting the worklog, ensure every activity is directly serializable to
    one MOCO activity: one customer, one project/task, one billability
    classification, and at most one Jira ticket. Split mixed customer/internal,
    billable/non-billable, or multi-ticket work before asking for approval while
@@ -150,10 +150,10 @@ When the user asks questions such as "what did I do today?", "what did I do yest
 
 When the user asks to create the interpreted worklog in MOCO:
 
-- Treat the most recently presented worklog table as approved input. Do not
+- Treat the most recently presented worklog as approved input. Do not
   silently re-estimate its tickets or durations while writing it. If newly read
   Jira or MOCO evidence creates a material conflict, stop and explain it.
-- The approved table must already be MOCO-homogeneous. Do not postpone splitting
+- The approved worklog must already be MOCO-homogeneous. Do not postpone splitting
   a mixed row until synchronization; that would change the approved activity
   structure. If a legacy approved row cannot map accurately to one customer,
   project/task, billability value, and Jira link, stop and obtain approval for
@@ -171,10 +171,10 @@ When the user asks to create the interpreted worklog in MOCO:
   whether it is contract work, defect remediation, or internal overhead, ask
   the user before synchronization.
 - `INTERN-W&S ROOMS-<year>` is the global fallback only after confirming that the Jira evidence identifies no customer or that MOCO has no matching dedicated W&S project. Never select it merely because a ticket prefix or local config mapping is missing.
-- Serialize the approved table as
+- Serialize the approved worklog as
   `approved-worklog-<YYYY-MM-DD>.json` using the structure in
   `worklog.example.json`. Set top-level `approved_total_hours` to the approved
-  table total; the synchronizer must reject a mismatched activity sum.
+  worklog total; the synchronizer must reject a mismatched activity sum.
   A ticketed activity must have exactly one Jira ticket. A meeting/admin entry
   without Jira must instead have a stable, descriptive `sync_key`. Every entry
   also needs explicit evidence-derived `customer` and `billable` values,
@@ -277,7 +277,7 @@ Ticket times marked as raw are detection times only. Do not treat them as final 
   activity, user evidence, or git timing supports an attended work session. A
   visible lock screen remains strong evidence that the user was away.
 - When explicitly supplied calendar evidence changes the result materially,
-  report both values and explain the reconciliation. When event times are
+  record both values and the reconciliation in the ledger. When event times are
   inferred from a screenshot, state that they are inferred unless the calendar
   grid makes the start and end times unambiguous.
 
@@ -323,8 +323,8 @@ General rules:
    corroborating foreground, git, review, build, or concrete outcome evidence.
    In Codex mode the analyzer supplies a candidate evidence union that still
    requires the same validation. Exclude background waits and unrelated work.
-   When the validated union exceeds ActivityWatch interaction, report both
-   values and explain each accepted extension; message counts are not hours.
+   When the validated union exceeds ActivityWatch interaction, record both
+   values and justify each accepted extension in the ledger; message counts are not hours.
 5. Commits, pushes, and review comments are anchors, not durations. Dense anchors
    may confirm continuity inside a candidate session, but a late squash or
    force-push does not make the preceding unsupported gap worked time.
@@ -337,7 +337,8 @@ General rules:
 8. Label confidence as `high` when foreground/chat and git evidence agree,
    `medium` when a coherent task and dense repository evidence fill ActivityWatch
    gaps, and `low` when only sparse anchors exist. Use `~` for medium/low time and
-   explain low-confidence entries after the table.
+   record the confidence and justification in the attribution ledger. Surface
+   material uncertainty briefly as described in **Output Format**.
 9. Determine contractual billability from Jira and MOCO rules only. There is no
    percentage-based billable-time heuristic.
 
@@ -384,66 +385,46 @@ repeat the entire audit manually when only one seam failed.
 
 ## Output Format
 
-The final answer must begin with a day summary line followed immediately by a markdown table. Do not wrap the table in a code block.
+Begin with the reviewed date and estimated total. Keep dates separate in a
+multi-day review. Present a compact list grouped by the MOCO project where
+the time will be logged; include its task name where needed to distinguish
+the mapping. Each activity has a short plain-language description, clickable
+Jira ticket when applicable, and duration. Name recognizable work explicitly
+(for example, "Anna/Hermes setup" rather than only "Infrastructure"). Mark
+billable activities and state the non-billable default once.
 
-Use short category labels so the table renders cleanly:
+Use `~` for inferred estimates. If coverage or allocation remains incomplete,
+label the total **PARTIAL** and add one sentence naming the material gaps or
+held work. Keep the full diagnostics in the evidence; expand them when asked.
+Ask briefly for approval or corrections when appropriate, while preserving
+the distinction between approval of a partial proposal and a complete day.
+No MOCO writes occur before explicit approval.
 
-- Dev
-- Bug
-- Review
-- Mtg
-- Support
-- Infra
-- Admin
+Default to this list instead of a wide table. Source/device totals, audit
+details, confidence methodology and scheduler housekeeping belong in the
+ledger/checkpoint, not the routine review. Do not repeat project mappings
+below the list. A formatting-only restatement preserves the existing activity
+structure and estimates and needs no new collection.
 
-Summary line format. When ActivityWatch contains more than one source, include
-each source's interaction total and the cross-source overlap removed by the
-combined union:
+### Evidence retained with the review
 
-```text
-Observed 08:30 - 17:15 | ActivityWatch interaction: 2.7h (Andromeda 2.1h; MacBook Pro 0.9h; 0.3h overlap) | GitHub activity through 21:27
-```
-
-Without explicitly supplied calendar evidence, do not turn gaps between these
-anchors into invented hours. State the observed interaction total and the wider
-evidence window separately.
-
-When explicitly supplied calendar evidence changes the total, identify that
-explicitly:
-
-```text
-08:30 - 17:15 (7.5h work, calendar-adjusted) | Meetings: 10:00 - 12:00 (2h)
-```
-
-Table format:
-
-```markdown
-| Cat | Client/Ticket | Source | Description | Billable | Time |
-|-----|---------------|--------|-------------|----------|------|
-| Dev | [ITEM-1234](https://3volutions.atlassian.net/browse/ITEM-1234) | Andromeda + MacBook Pro | Feature description | Yes | 4.5h |
-| Bug | [ROMSD-5678](https://3volutions.atlassian.net/browse/ROMSD-5678) | MacBook Pro | Issue description | No | 30m |
-| Mtg | Client (Contact) | Andromeda | Meeting topic | No | 1h |
-```
-
-Directly below the table, name each row's MOCO project and task so the user
-approves the exact activity mapping.
-
-Every worklog row must contain a `Source` value. Use the friendly labels
+Every activity in the attribution ledger must contain sources. Use the friendly labels
 `Andromeda` and `MacBook Pro` for the configured ActivityWatch sources
 `andromeda` and `macbook-pro`. The source identifies where the evidence was
 recorded; it is not a separate customer, task, or time allocation dimension.
-When the same task appears on multiple machines, keep one MOCO-homogeneous row,
+When the same task appears on multiple machines, keep one MOCO-homogeneous activity,
 list all contributing sources (for example `Andromeda + MacBook Pro`), and use
 the union of accepted intervals so simultaneous work is not counted twice. Do
 not split a task solely because its evidence crossed devices. For evidence that
 cannot be attributed to a physical device, state that explicitly, for example
 `GitHub (device unknown)` or `T3 Orion server (client unknown)`; never silently guess.
 
-Additional notes or uncertainty can follow after the table, but the table must come first.
-Include a compact GitHub audit note naming the repositories covered, the number
-of distinct commits inspected, any rewritten/superseded commits, and material
-PR/review-only activity. State confidence for inferred time; `high` can be
-implicit, while `medium`/`low` must be named and briefly justified.
+Record each device's interaction total, cross-source overlap, observed window
+and wider evidence window separately from the estimated work duration. Record
+any explicitly supplied calendar adjustment. Preserve the GitHub repositories,
+distinct commit count, rewritten/superseded outcomes and material PR/review
+activity, plus confidence and justification for inferred time. Compact output
+does not relax evidence collection, completeness or attribution checks.
 
 ## Categories
 
